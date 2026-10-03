@@ -78,15 +78,15 @@ button, input { font: inherit; }
   left: 0;
   top: 0;
   z-index: 40;
-  width: 84px;
-  height: 84px;
+  width: 112px;
+  height: 112px;
   pointer-events: none;
 }
 
 .uriel-pet-home {
   left: auto;
   right: 12px;
-  top: 8px;
+  top: 12px;
 }
 
 .uriel-hop,
@@ -106,25 +106,14 @@ button, input { font: inherit; }
 
 .uriel-hop { animation: uriel-hop 0.36s steps(2, end) infinite; }
 
-.uriel-bubble {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 36px;
-  height: auto;
-  image-rendering: pixelated;
-  pointer-events: none;
-}
-
 @keyframes uriel-hop {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-4px); }
 }
 
 @media (max-width: 640px) {
-  .uriel-pet { width: 64px; height: 64px; }
-  .uriel-pet-home { right: 8px; top: 6px; }
-  .uriel-bubble { width: 28px; }
+  .uriel-pet { width: 88px; height: 88px; }
+  .uriel-pet-home { right: 8px; top: 8px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

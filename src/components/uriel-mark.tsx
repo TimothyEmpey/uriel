@@ -15,7 +15,7 @@ type Pose =
   | "walk-left"
   | "disappointed";
 
-const art = "?v=2";
+const art = "?v=3";
 
 const sprite: Record<Pose, string> = {
   idle: `/uriel/idle.png${art}`,
@@ -28,14 +28,6 @@ const sprite: Record<Pose, string> = {
   magic: `/uriel/magic.png${art}`,
   "walk-left": `/uriel/walk-left.png${art}`,
   disappointed: `/uriel/disappointed.png${art}`,
-};
-
-const bubble: Partial<Record<Pose, string>> = {
-  happy: `/uriel/badge-happy.png${art}`,
-  eat: `/uriel/badge-hungry.png${art}`,
-  sleep: `/uriel/badge-sleepy.png${art}`,
-  magic: `/uriel/badge-magic.png${art}`,
-  sit: `/uriel/badge-play.png${art}`,
 };
 
 function moods(tone: Tone): Pose[] {
@@ -66,14 +58,18 @@ export function UrielMark({ tone }: { tone: Tone }) {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     const box = () => {
       const narrow = window.innerWidth < 640;
-      const size = narrow ? 64 : 84;
+      // Keep in step with .uriel-pet in globals.css.
+      const size = narrow ? 88 : 112;
       const margin = narrow ? 8 : 12;
-      // Header reserves pr-20 / pr-28. He paces inside that top-right slot.
-      const column = narrow ? 80 : 112;
-      const y = margin;
-      const maxX = Math.max(margin, window.innerWidth - size - margin);
-      const minX = Math.min(maxX, Math.max(margin, window.innerWidth - column));
-      return { minX, minY: y, maxX, maxY: y, homeX: maxX, homeY: y };
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      // Top-right cell of a 3 by 3 screen. His whole sprite stays inside it.
+      const maxX = Math.max(0, width - size - margin);
+      const minX = Math.min(width * (2 / 3), maxX);
+      const minY = margin;
+      let maxY = height / 3 - size - margin;
+      if (maxY < minY) maxY = minY;
+      return { minX, minY, maxX, maxY, homeX: maxX, homeY: minY };
     };
     const place = (next: { x: number; y: number }, ms: number) => {
       posRef.current = next;
@@ -173,7 +169,6 @@ export function UrielMark({ tone }: { tone: Tone }) {
   }, [tone, ready]);
 
   const walking = pose === "walk" || pose === "walk-left";
-  const mood = bubble[pose];
 
   return (
     <div
@@ -182,15 +177,6 @@ export function UrielMark({ tone }: { tone: Tone }) {
       style={ready ? { transform: `translate(${pos.x}px, ${pos.y}px)`, transition: travel > 0 ? `transform ${travel}ms linear` : "none" } : undefined}
       aria-hidden
     >
-      {mood ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          className="uriel-bubble"
-          src={mood}
-          alt=""
-
-        />
-      ) : null}
       <div className={walking ? "uriel-hop" : "uriel-stand"}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img className="uriel-sprite" src={sprite[pose]} alt="" style={flip ? { transform: "scaleX(-1)" } : undefined} />
