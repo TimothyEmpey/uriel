@@ -108,7 +108,9 @@ button, input { font: inherit; }
 
 .uriel-bubble {
   position: absolute;
-  width: 54px;
+  top: 0;
+  left: 0;
+  width: 36px;
   height: auto;
   image-rendering: pixelated;
   pointer-events: none;
@@ -122,7 +124,7 @@ button, input { font: inherit; }
 @media (max-width: 640px) {
   .uriel-pet { width: 64px; height: 64px; }
   .uriel-pet-home { right: 8px; top: 6px; }
-  .uriel-bubble { width: 42px; }
+  .uriel-bubble { width: 28px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

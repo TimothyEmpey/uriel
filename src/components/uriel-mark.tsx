@@ -63,11 +63,15 @@ export function UrielMark({ tone }: { tone: Tone }) {
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     const box = () => {
-      const s = window.innerWidth < 640 ? 64 : 84;
-      const bottom = window.innerWidth < 640 ? 78 : 10;
-      const maxX = Math.max(12, window.innerWidth - s - 14);
-      const maxY = Math.max(12, window.innerHeight - s - bottom);
-      return { minX: 12, minY: 12, maxX, maxY, homeX: maxX, homeY: 12 };
+      const narrow = window.innerWidth < 640;
+      const size = narrow ? 64 : 84;
+      const margin = narrow ? 8 : 12;
+      // Header reserves pr-20 / pr-28. He paces inside that top-right slot.
+      const column = narrow ? 80 : 112;
+      const y = margin;
+      const maxX = Math.max(margin, window.innerWidth - size - margin);
+      const minX = Math.min(maxX, Math.max(margin, window.innerWidth - column));
+      return { minX, minY: y, maxX, maxY: y, homeX: maxX, homeY: y };
     };
     const place = (next: { x: number; y: number }, ms: number) => {
       posRef.current = next;
@@ -105,9 +109,9 @@ export function UrielMark({ tone }: { tone: Tone }) {
           y: goHome ? area.homeY : area.minY + Math.random() * (area.maxY - area.minY),
         };
         dist = Math.hypot(dest.x - current.x, dest.y - current.y);
-        if (dist >= 90) break;
+        if (dist >= 8) break;
       }
-      if (dist < 36) {
+      if (dist < 4) {
         emote();
         return;
       }
@@ -182,11 +186,7 @@ export function UrielMark({ tone }: { tone: Tone }) {
           className="uriel-bubble"
           src={mood}
           alt=""
-          style={pos.y < 56
-            ? { left: 0, top: "calc(100% + 4px)" }
-            : pos.x < 90
-              ? { left: "calc(100% + 4px)", top: 0 }
-              : { right: "calc(100% + 4px)", top: 0 }}
+
         />
       ) : null}
       <div className={walking ? "uriel-hop" : "uriel-stand"}>
