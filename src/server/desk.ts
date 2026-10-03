@@ -39,11 +39,18 @@ export async function getDesk() {
     .filter((trade) => trade.origin === "ENGINE")
     .reduce((sum, trade) => sum + Math.round(Math.abs(trade.entryPrice - trade.stopPrice) * trade.quantity * 100), 0);
 
-  const bars = await prisma.marketBar.findMany({
-    where: { accountId: account.id, symbol: "SPY" },
-    orderBy: { ts: "desc" },
-    take: 180,
-  });
+  const [dailyBars, minuteBars] = await Promise.all([
+    prisma.marketBar.findMany({
+      where: { accountId: account.id, symbol: "SPY", timeframe: "1d" },
+      orderBy: { ts: "desc" },
+      take: 140,
+    }),
+    prisma.marketBar.findMany({
+      where: { accountId: account.id, symbol: "SPY", timeframe: "1m" },
+      orderBy: { ts: "desc" },
+      take: 500,
+    }),
+  ]);
 
   return {
     demo: account.demo,
@@ -158,9 +165,21 @@ export async function getDesk() {
     snapshots: account.snapshots
       .map((snapshot) => ({ t: snapshot.capturedAt.getTime(), equityCents: snapshot.equityCents }))
       .reverse(),
-    spyBars: bars
-      .map((bar) => ({ t: bar.ts.getTime(), close: bar.close }))
-      .reverse(),
+    spyBars: {
+      daily: dailyBars.map(candle).reverse(),
+      minute: minuteBars.map(candle).reverse(),
+    },
+  };
+}
+
+function candle(bar: { ts: Date; open: number; high: number; low: number; close: number; volume: number }) {
+  return {
+    t: bar.ts.getTime(),
+    open: bar.open,
+    high: bar.high,
+    low: bar.low,
+    close: bar.close,
+    volume: bar.volume,
   };
 }
 

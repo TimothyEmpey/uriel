@@ -31,12 +31,12 @@ export default async function DashboardPage() {
         <Metric label="Week P&L" value={formatUsd(desk.weekPnlCents, true)} tone={moneyTone(desk.weekPnlCents)} />
       </section>
       <section className="grid gap-4 lg:grid-cols-5">
-        <Card className="lg:col-span-3">
+        <Card className="min-w-0 lg:col-span-3">
           <div className="mb-3 flex items-baseline justify-between">
             <CardTitle>SPY</CardTitle>
             <p className="tabular text-lg font-semibold">{desk.spy == null ? "—" : formatPx(desk.spy)}</p>
           </div>
-          <PriceChart points={desk.spyBars} />
+          <PriceChart daily={desk.spyBars.daily} minute={desk.spyBars.minute} />
         </Card>
         <Card className="space-y-3 lg:col-span-2">
           <CardTitle>Status</CardTitle>

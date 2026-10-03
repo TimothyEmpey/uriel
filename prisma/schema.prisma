@@ -179,5 +179,5 @@ model MarketBar {
   timeframe  String   @default("1m")
   createdAt  DateTime @default(now())
 
-  @@unique([accountId, symbol, ts])
+  @@unique([accountId, symbol, ts, timeframe])
 }

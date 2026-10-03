@@ -54,23 +54,28 @@ function writeHeartbeat(beat: Heartbeat) {
 }
 
 async function latestSpy(accountId: string) {
+  const minute = await prisma.marketBar.findFirst({
+    where: { accountId, symbol: TRADABLE_SYMBOL, timeframe: "1m" },
+    orderBy: { ts: "desc" },
+  });
+  if (minute) return minute;
   return prisma.marketBar.findFirst({
-    where: { accountId, symbol: TRADABLE_SYMBOL },
+    where: { accountId, symbol: TRADABLE_SYMBOL, timeframe: "1d" },
     orderBy: { ts: "desc" },
   });
 }
 
-async function ingestSymbol(accountId: string, symbol: string, interval: "1m" | "1d", range: string) {
+async function ingestSymbol(accountId: string, symbol: string, interval: "1m" | "1d", range: string, all = false) {
   const bars = await fetchYahooBars(symbol, interval, range);
   const latest = await prisma.marketBar.findFirst({
     where: { accountId, symbol, timeframe: interval },
     orderBy: { ts: "desc" },
   });
-  const fresh = bars.filter((bar) => !latest || bar.ts >= latest.ts.getTime());
+  const fresh = all ? bars : bars.filter((bar) => !latest || bar.ts >= latest.ts.getTime());
   for (const bar of fresh) {
     const volume = Math.min(2_000_000_000, Math.max(0, Math.round(bar.volume)));
     await prisma.marketBar.upsert({
-      where: { accountId_symbol_ts: { accountId, symbol, ts: new Date(bar.ts) } },
+      where: { accountId_symbol_ts_timeframe: { accountId, symbol, ts: new Date(bar.ts), timeframe: interval } },
       create: {
         accountId,
         symbol,
@@ -93,6 +98,12 @@ export async function refreshMarket(accountId: string, clock: SessionClock, now:
   if (active || now.getTime() - lastQuoteFetch > 5 * 60_000) {
     lastQuoteFetch = now.getTime();
     await ingestSymbol(accountId, TRADABLE_SYMBOL, active ? "1m" : "1d", active ? "1d" : "5d");
+  }
+  if (!active) {
+    const dailyCount = await prisma.marketBar.count({
+      where: { accountId, symbol: TRADABLE_SYMBOL, timeframe: "1d" },
+    });
+    if (dailyCount < 80) await ingestSymbol(accountId, TRADABLE_SYMBOL, "1d", "6mo", true);
   }
   if (now.getTime() - lastHoldingFetch > 60 * 60_000) {
     lastHoldingFetch = now.getTime();

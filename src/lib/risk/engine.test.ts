@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { nextSessionWake, nextTopOfHourEt, sessionClock, workerWaitMs } from "@/lib/market/calendar";
-import { isStrategyBar } from "@/lib/market/bars";
+import { fiveMinuteCandles, isStrategyBar } from "@/lib/market/bars";
 import { etInstant } from "@/lib/market/time";
 import { assertAgentExit, assertTradableSymbol } from "@/lib/broker/firewall";
 import { aggregateEquity } from "@/lib/portfolio/equity";
@@ -198,6 +198,19 @@ describe("calendar", () => {
   it("keeps daily prints out of the opening range", () => {
     expect(isStrategyBar("1m")).toBe(true);
     expect(isStrategyBar("1d")).toBe(false);
+  });
+
+  it("builds 5-minute candles from one-minute prints", () => {
+    const base = etInstant("2026-10-05", 9, 30).getTime();
+    const candles = fiveMinuteCandles([
+      { t: base, open: 10, high: 11, low: 9.5, close: 10.5, volume: 100 },
+      { t: base + 60_000, open: 10.5, high: 12, low: 10, close: 11.5, volume: 50 },
+      { t: base + 5 * 60_000, open: 11.5, high: 11.8, low: 11, close: 11.2, volume: 80 },
+    ]);
+    expect(candles).toEqual([
+      { t: base, open: 10, high: 12, low: 9.5, close: 11.5, volume: 150 },
+      { t: base + 5 * 60_000, open: 11.5, high: 11.8, low: 11, close: 11.2, volume: 80 },
+    ]);
   });
 });
 
