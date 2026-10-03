@@ -15,25 +15,27 @@ type Pose =
   | "walk-left"
   | "disappointed";
 
+const art = "?v=2";
+
 const sprite: Record<Pose, string> = {
-  idle: "/uriel/idle.png",
-  walk: "/uriel/walk.png",
-  look: "/uriel/look.png",
-  happy: "/uriel/happy.png",
-  sit: "/uriel/sit.png",
-  sleep: "/uriel/sleep.png",
-  eat: "/uriel/eat.png",
-  magic: "/uriel/magic.png",
-  "walk-left": "/uriel/walk-left.png",
-  disappointed: "/uriel/disappointed.png",
+  idle: `/uriel/idle.png${art}`,
+  walk: `/uriel/walk.png${art}`,
+  look: `/uriel/look.png${art}`,
+  happy: `/uriel/happy.png${art}`,
+  sit: `/uriel/sit.png${art}`,
+  sleep: `/uriel/sleep.png${art}`,
+  eat: `/uriel/eat.png${art}`,
+  magic: `/uriel/magic.png${art}`,
+  "walk-left": `/uriel/walk-left.png${art}`,
+  disappointed: `/uriel/disappointed.png${art}`,
 };
 
 const bubble: Partial<Record<Pose, string>> = {
-  happy: "/uriel/badge-happy.png",
-  eat: "/uriel/badge-hungry.png",
-  sleep: "/uriel/badge-sleepy.png",
-  magic: "/uriel/badge-magic.png",
-  sit: "/uriel/badge-play.png",
+  happy: `/uriel/badge-happy.png${art}`,
+  eat: `/uriel/badge-hungry.png${art}`,
+  sleep: `/uriel/badge-sleepy.png${art}`,
+  magic: `/uriel/badge-magic.png${art}`,
+  sit: `/uriel/badge-play.png${art}`,
 };
 
 function moods(tone: Tone): Pose[] {
