@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  account      Account?
+}
+
+model Account {
+  id                   String   @id @default(cuid())
+  userId               String   @unique
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode                 String   @default("PAPER")
+  demo                 Boolean  @default(true)
+  cashCents            Int
+  equityCents          Int
+  peakEquityCents      Int
+  dayStartEquityCents  Int
+  dayStartDate         String?
+  weekStartEquityCents Int
+  weekStartDate        String?
+  baselineSpyShares    Int      @default(0)
+  agentPaused          Boolean  @default(false)
+  haltReason           String?
+  shortingEnabled      Boolean  @default(false)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  holdings   Holding[]
+  orders     Order[]
+  trades     Trade[]
+  snapshots  EquitySnapshot[]
+  decisions  RiskDecisionRecord[]
+  events     AgentEvent[]
+  sessions   StrategySession[]
+  bars       MarketBar[]
+}
+
+model Holding {
+  id           String   @id @default(cuid())
+  accountId    String
+  account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol       String
+  quantity     Float
+  averagePrice Float
+  marketPrice  Float
+  origin       String
+  tradable     Boolean
+  updatedAt    DateTime @updatedAt
+
+  @@unique([accountId, symbol])
+}
+
+model Trade {
+  id               String    @id @default(cuid())
+  accountId        String
+  account          Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol           String
+  side             String
+  quantity         Int
+  entryPrice       Float
+  stopPrice        Float
+  initialStopPrice Float
+  targetPrice      Float
+  exitPrice        Float?
+  realizedPnlCents Int       @default(0)
+  rMultiple        Float?
+  status           String
+  setup            String
+  strategy         String
+  origin           String    @default("ENGINE")
+  notes            String?
+  journal          String?
+  openedAt         DateTime
+  closedAt         DateTime?
+  orders           Order[]
+}
+
+model Order {
+  id           String    @id @default(cuid())
+  accountId    String
+  account      Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  tradeId      String?
+  trade        Trade?    @relation(fields: [tradeId], references: [id])
+  symbol       String
+  side         String
+  type         String
+  purpose      String
+  quantity     Int
+  limitPrice   Float?
+  stopPrice    Float?
+  fillPrice    Float?
+  status       String
+  rejectReason String?
+  createdAt    DateTime  @default(now())
+  filledAt     DateTime?
+}
+
+model EquitySnapshot {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  equityCents Int
+  cashCents   Int
+  spyPrice    Float?
+  capturedAt  DateTime
+
+  @@index([accountId, capturedAt])
+}
+
+model RiskDecisionRecord {
+  id        String   @id @default(cuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  approved  Boolean
+  proposal  Json
+  computed  Json
+  reasons   String[]
+  createdAt DateTime @default(now())
+}
+
+model AgentEvent {
+  id        String   @id @default(cuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  level     String
+  kind      String
+  message   String
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  @@index([accountId, createdAt])
+}
+
+model StrategySession {
+  id                String    @id @default(cuid())
+  accountId         String
+  account           Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  sessionDate       String
+  orHigh            Float?
+  orLow             Float?
+  vwap              Float?
+  standDown         String?
+  tradesTaken       Int       @default(0)
+  consecutiveLosses Int       @default(0)
+  longStopped       Boolean   @default(false)
+  lastSignalBarTs   DateTime?
+  dayBaselined      Boolean   @default(false)
+  flattened         Boolean   @default(false)
+  lastTradeWasLoss  Boolean   @default(false)
+  lastTradeShares   Int?
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([accountId, sessionDate])
+}
+
+model MarketBar {
+  id        String   @id @default(cuid())
+  accountId String
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol    String
+  ts        DateTime
+  open      Float
+  high      Float
+  low       Float
+  close     Float
+  volume    Int
+  createdAt DateTime @default(now())
+
+  @@unique([accountId, symbol, ts])
+}

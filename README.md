@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Uriel
 
-## Getting Started
+Paper-first SPY day-trading desk. A deterministic playbook proposes entries. A separate risk engine sizes them or refuses them. The broker is last.
 
-First, run the development server:
+Uriel trades SPY only, and only shares the agent bought. Other holdings are shown and never sold. Reserved SPY that was already in the book is not sold either. Live Robinhood orders stay off until you explicitly arm them.
+
+This is trading software, not investment advice. You can lose money.
+
+## Playbook
+
+15-minute opening range on SPY, confirmed by a 5-minute close, volume of at least 1.3× the opening pace, and a rising VWAP. The range is skipped when it is tiny or event-sized. Shorts stay off: 2026 SPY breakout losses clustered on the short side, and Robinhood’s agent accounts place long equity orders. One to three trades, flat before the close.
+
+The numeric guardrails are unchanged: 2% risk per trade, 5% daily loss, 5% weekly loss, 5% drawdown from peak, 2 open positions, 4% combined open risk, 3 trades a day. Stops are required before entry and cannot be widened. Size is `floor(equity × 2% / stop distance)`.
+
+The model is not on the order path. If `XAI_API_KEY` is set, Grok writes one journal sentence after a closed trade, at most three times a day.
+
+## Why the worker is cheap to leave on
+
+The hot path is a Node loop: quotes, the playbook, the risk engine, then the paper ledger. It polls about every 20 seconds while the entry window is open and about every 60 seconds overnight, on weekends, and on NYSE holidays. No model call is required for it to trade.
+
+US equities are not a 24-hour market. The process stays up. It only sends orders from 9:50 to 15:30 ET (12:30 on the two 2026 early closes) and flattens by 15:50 ET.
+
+## Robinhood
+
+Robinhood does not give an agent the main brokerage account. The official path is a separate agentic account connected at `https://agent.robinhood.com/mcp/trading`. Put the bearer token in `ROBINHOOD_MCP_TOKEN` when you have one.
+
+Live orders also require `LIVE_TRADING=true` and `ROBINHOOD_ORDER_CONFIRMED=true`. Until those are set, Uriel keeps using the paper ledger. The symbol firewall runs before any order function, confirmed or not.
+
+Postgres is the ledger because the app uses Prisma against relational trades, orders, and snapshots. Cloudflare D1 is not Postgres. Run Postgres locally, or point `DATABASE_URL` at Neon, Supabase, or Postgres behind Cloudflare Hyperdrive. The always-on loop is a normal Node process, not a Worker.
+
+## Run
 
 ```bash
+cp .env.example .env
+# set DATABASE_URL, AUTH_SECRET, and URIEL_OPERATOR_PASSWORD
+
+brew install postgresql@16
+bash scripts/postgres.sh
+npx prisma migrate dev --name init
+npx prisma db seed
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run worker
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Sign in at `http://localhost:3000` with `URIEL_OPERATOR_EMAIL` and `URIEL_OPERATOR_PASSWORD`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`docker compose up -d` is the alternative database if you already use Docker. Then set `DATABASE_URL=postgresql://uriel:uriel@localhost:5432/uriel`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Tests
 
-## Learn More
+```bash
+npm test
+```
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The risk engine, stop rule, symbol firewall, calendar, and opening-range rules are covered without a database.

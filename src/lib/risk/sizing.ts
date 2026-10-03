@@ -1,0 +1,27 @@
+import { RISK_LIMITS } from "@/lib/risk/constants";
+
+export function riskBudgetCents(equityCents: number, fraction: number = RISK_LIMITS.maxRiskPerTrade) {
+  return Math.floor(equityCents * fraction + 1e-6);
+}
+
+/**
+ * position_size = floor(equity × max_risk_per_trade / abs(entry - stop))
+ * The budget is floored to the cent before the share floor, so size never rounds up.
+ */
+export function sharesForRisk(equityCents: number, entryPrice: number, stopPrice: number) {
+  const budgetCents = riskBudgetCents(equityCents);
+  const distance = Math.abs(entryPrice - stopPrice);
+  if (!(distance > 0) || budgetCents <= 0 || !(entryPrice > 0)) {
+    return { shares: 0, budgetCents, distance };
+  }
+  const shares = Math.floor(budgetCents / 100 / distance);
+  return { shares, budgetCents, distance };
+}
+
+export function dollarRiskCents(shares: number, entryPrice: number, stopPrice: number) {
+  return Math.round(shares * Math.abs(entryPrice - stopPrice) * 100);
+}
+
+export function notionalCents(shares: number, price: number) {
+  return Math.round(shares * price * 100);
+}
