@@ -1,11 +1,21 @@
 import { sessionClock } from "@/lib/market/calendar";
 import { RISK_LIMITS, STRATEGY_NAME } from "@/lib/risk/constants";
 import { riskBudgetCents } from "@/lib/risk/sizing";
+import { alpacaPaperConfigured, alpacaStatus, syncAlpacaPaper } from "@/server/alpaca";
 import { prisma } from "@/server/db";
 import { robinhoodStatus } from "@/server/robinhood";
 import { readHeartbeat } from "@/server/trading";
 
 export async function getDesk() {
+  const now = new Date();
+  const existing = await prisma.account.findFirst({ select: { id: true } });
+  if (existing && alpacaPaperConfigured()) {
+    try {
+      await syncAlpacaPaper(existing.id, now);
+    } catch {
+      // The page still renders. The broker line shows that the keys are present.
+    }
+  }
   const account = await prisma.account.findFirst({
     include: {
       holdings: { orderBy: { symbol: "asc" } },
@@ -19,7 +29,6 @@ export async function getDesk() {
   });
   if (!account) return null;
 
-  const now = new Date();
   const clock = sessionClock(now);
   const heartbeat = readHeartbeat();
   const spy = heartbeat?.spy ?? account.snapshots.find((snapshot) => snapshot.spyPrice)?.spyPrice ?? null;
@@ -63,6 +72,7 @@ export async function getDesk() {
     tradesToday: account.sessions[0]?.sessionDate === clock.dateKey ? account.sessions[0].tradesTaken : 0,
     heartbeat,
     robinhood: robinhoodStatus(),
+    alpaca: alpacaStatus(),
     limits: RISK_LIMITS,
     session: account.sessions[0]
       ? {

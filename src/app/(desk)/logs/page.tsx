@@ -1,4 +1,4 @@
-import { DemoBanner, FillTape, PositionBook } from "@/components/desk-widgets";
+import { BookBanner, FillTape, PositionBook } from "@/components/desk-widgets";
 import { Card, CardTitle } from "@/components/ui/card";
 import { getDesk } from "@/server/desk";
 
@@ -11,7 +11,7 @@ export default async function LogsPage() {
         <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Ledger</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">Logs</h1>
       </div>
-      {desk.demo ? <DemoBanner /> : null}
+      <BookBanner mode={desk.mode} demo={desk.demo} />
       <PositionBook desk={desk} includeUntouchable={false} />
       <FillTape desk={desk} />
       <Card>

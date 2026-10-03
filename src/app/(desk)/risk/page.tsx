@@ -70,7 +70,7 @@ export default async function RiskPage() {
               <Button type="submit" variant="outline">Flatten SPY day trades</Button>
             </form>
           </div>
-          <p className="mt-4 text-xs leading-5 text-[var(--muted)]">{desk.robinhood.detail}</p>
+          <p className="mt-4 text-xs leading-5 text-[var(--muted)]">{desk.alpaca.configured ? desk.alpaca.detail : desk.robinhood.detail}</p>
         </Card>
       </div>
       <Card>

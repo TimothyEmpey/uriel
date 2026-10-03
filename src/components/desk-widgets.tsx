@@ -6,9 +6,21 @@ import { Card, CardTitle } from "@/components/ui/card";
 export function DemoBanner() {
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] px-4 py-3 text-sm">
-      Paper demo book. These holdings and sample prints are not your Robinhood account. Uriel cannot sell anything except SPY shares it buys, and live orders stay off.
+      Paper demo book. These holdings and sample prints are not your brokerage account. Uriel cannot sell anything except SPY shares it buys, and live orders stay off.
     </div>
   );
+}
+
+export function BookBanner({ mode, demo }: { mode: string; demo: boolean }) {
+  if (mode === "ALPACA_PAPER") {
+    return (
+      <div className="rounded-2xl border border-[var(--border)] bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] px-4 py-3 text-sm">
+        Alpaca paper account. Equity, cash, and positions come from that account. Sample prints are the old demo book, not Alpaca trades. Uriel sells only SPY shares it buys, and it sizes from cash rather than margin.
+      </div>
+    );
+  }
+  if (!demo) return null;
+  return <DemoBanner />;
 }
 
 export function Metric({ label, value, hint, tone }: { label: string; value: string; hint?: string; tone?: "good" | "bad" }) {

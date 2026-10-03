@@ -1,5 +1,5 @@
 import { PriceChart } from "@/components/charts";
-import { DemoBanner, Metric, moneyTone, PositionBook } from "@/components/desk-widgets";
+import { BookBanner, Metric, moneyTone, PositionBook } from "@/components/desk-widgets";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardTitle } from "@/components/ui/card";
 import { formatPx, formatUsd } from "@/lib/market/time";
@@ -8,7 +8,9 @@ import { getDesk } from "@/server/desk";
 export default async function DashboardPage() {
   const desk = await getDesk();
   if (!desk) return <p>Seed the paper account before opening the desk.</p>;
-  const workerFresh = desk.heartbeat ? Date.now() - new Date(desk.heartbeat.at).getTime() < 90_000 : false;
+  const quiet = desk.clock.phase === "closed" || desk.clock.phase === "idle";
+  const freshFor = quiet ? 75 * 60_000 : 90_000;
+  const workerFresh = desk.heartbeat ? Date.now() - new Date(desk.heartbeat.at).getTime() < freshFor : false;
 
   return (
     <div className="space-y-5">
@@ -17,7 +19,7 @@ export default async function DashboardPage() {
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">Dashboard</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">{desk.clock.label} · {desk.strategy}</p>
       </div>
-      {desk.demo ? <DemoBanner /> : null}
+      <BookBanner mode={desk.mode} demo={desk.demo} />
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Account equity" value={formatUsd(desk.equityCents)} hint={`Peak ${formatUsd(desk.peakEquityCents)}`} />
         <Metric label="Today's P&L" value={formatUsd(desk.dayPnlCents, true)} tone={moneyTone(desk.dayPnlCents)} />
@@ -40,9 +42,9 @@ export default async function DashboardPage() {
           <CardTitle>Status</CardTitle>
           <StatusRow label="Uriel" value={workerFresh ? (desk.paused ? "Paused" : "Running") : "Worker offline"} />
           <StatusRow label="Risk engine" value={desk.haltReason ?? "Clear"} />
-          <StatusRow label="Broker" value={desk.mode === "PAPER" ? "Paper" : "Robinhood"} />
-          <StatusRow label="Robinhood" value={desk.robinhood.connected ? "Token present" : "Not connected"} />
-          <p className="text-xs leading-5 text-[var(--muted)]">{desk.robinhood.detail}</p>
+          <StatusRow label="Broker" value={desk.mode === "ALPACA_PAPER" ? "Alpaca paper" : desk.mode === "PAPER" ? "Paper ledger" : "Robinhood"} />
+          <StatusRow label="Alpaca" value={desk.alpaca.configured ? "Paper connected" : "Not connected"} />
+          <p className="text-xs leading-5 text-[var(--muted)]">{desk.alpaca.configured ? desk.alpaca.detail : desk.robinhood.detail}</p>
           {desk.session?.orHigh && desk.session.orLow ? (
             <p className="text-sm">Opening range {formatPx(desk.session.orLow)} – {formatPx(desk.session.orHigh)}</p>
           ) : null}
@@ -56,7 +58,7 @@ export default async function DashboardPage() {
           {desk.recentTrades.slice(0, 6).map((trade) => (
             <div key={trade.id} className="flex items-center justify-between gap-3 text-sm">
               <div className="flex items-center gap-2">
-                <Badge>{trade.status}</Badge>
+                <Badge>{trade.origin === "DEMO" ? "Sample" : trade.status}</Badge>
                 <span>{trade.quantity} {trade.symbol}</span>
                 <span className="text-[var(--muted)]">{trade.setup}</span>
               </div>

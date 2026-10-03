@@ -1,5 +1,5 @@
 import { PnlBars } from "@/components/charts";
-import { DemoBanner, Metric, moneyTone } from "@/components/desk-widgets";
+import { BookBanner, Metric, moneyTone } from "@/components/desk-widgets";
 import { Card, CardTitle } from "@/components/ui/card";
 import { formatUsd } from "@/lib/market/time";
 import { getDesk } from "@/server/desk";
@@ -32,7 +32,7 @@ export default async function PnlPage() {
         <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Results</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">P&L</h1>
       </div>
-      {desk.demo ? <DemoBanner /> : null}
+      <BookBanner mode={desk.mode} demo={desk.demo} />
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Realized P&L" value={formatUsd(realized, true)} tone={moneyTone(realized)} />
         <Metric label="Win rate" value={closed.length ? `${Math.round((wins.length / closed.length) * 100)}%` : "—"} hint={`${wins.length} wins · ${losses.length} losses`} />

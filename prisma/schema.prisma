@@ -97,13 +97,14 @@ model Order {
   type         String
   purpose      String
   quantity     Int
-  limitPrice   Float?
-  stopPrice    Float?
-  fillPrice    Float?
-  status       String
-  rejectReason String?
-  createdAt    DateTime  @default(now())
-  filledAt     DateTime?
+  limitPrice    Float?
+  stopPrice     Float?
+  fillPrice     Float?
+  status        String
+  rejectReason  String?
+  brokerOrderId String?
+  createdAt     DateTime  @default(now())
+  filledAt      DateTime?
 }
 
 model EquitySnapshot {

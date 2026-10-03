@@ -1,5 +1,5 @@
 import { EquityChart } from "@/components/charts";
-import { DemoBanner, PositionBook } from "@/components/desk-widgets";
+import { BookBanner, PositionBook } from "@/components/desk-widgets";
 import { Card, CardTitle } from "@/components/ui/card";
 import { getDesk } from "@/server/desk";
 
@@ -12,7 +12,7 @@ export default async function PortfolioPage() {
         <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Balances</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">Portfolio</h1>
       </div>
-      {desk.demo ? <DemoBanner /> : null}
+      <BookBanner mode={desk.mode} demo={desk.demo} />
       <Card>
         <CardTitle>Equity</CardTitle>
         <div className="mt-4">

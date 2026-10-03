@@ -5,7 +5,7 @@ import { assertAgentExit, assertTradableSymbol } from "@/lib/broker/firewall";
 import { previousBusinessDays, sessionClock, weekKey, type SessionClock } from "@/lib/market/calendar";
 import { etParts, roundPrice } from "@/lib/market/time";
 import { accountEquityCents } from "@/lib/portfolio/equity";
-import { TRADABLE_SYMBOL } from "@/lib/risk/constants";
+import { STRATEGY_ID, TRADABLE_SYMBOL } from "@/lib/risk/constants";
 import { evaluateRisk, haltReasonForState } from "@/lib/risk/engine";
 import { dollarRiskCents, notionalCents, sharesForRisk } from "@/lib/risk/sizing";
 import { stopChangeAllowed } from "@/lib/risk/stops";
@@ -13,6 +13,15 @@ import type { RiskState, Side } from "@/lib/risk/types";
 import { evaluateOrb, type Bar } from "@/lib/strategy/orb";
 import { prisma } from "@/server/db";
 import { deterministicJournal, maybeNarrate } from "@/server/journal";
+import {
+  alpacaPaperConfigured,
+  cancelPaperOrder,
+  getPaperOrder,
+  placePaperBracket,
+  replacePaperStop,
+  sellPaperShares,
+  syncAlpacaPaper,
+} from "@/server/alpaca";
 import { fetchYahooBars } from "@/server/market";
 
 const HEARTBEAT_PATH = path.join(process.cwd(), "data", "heartbeat.json");
@@ -152,17 +161,22 @@ async function riskState(account: Account, session: StrategySession, equityCents
   const open = await prisma.trade.findMany({
     where: { accountId: account.id, status: "OPEN", origin: "ENGINE" },
   });
-  const openRiskCents = open.reduce(
-    (sum, trade) => sum + dollarRiskCents(trade.quantity, trade.entryPrice, trade.stopPrice),
-    0,
-  );
+  const workingEntries = await prisma.order.findMany({
+    where: { accountId: account.id, status: "WORKING", purpose: "ENTRY", symbol: TRADABLE_SYMBOL },
+  });
+  const openRiskCents =
+    open.reduce((sum, trade) => sum + dollarRiskCents(trade.quantity, trade.entryPrice, trade.stopPrice), 0) +
+    workingEntries.reduce((sum, order) => {
+      if (order.limitPrice == null || order.stopPrice == null) return sum;
+      return sum + dollarRiskCents(order.quantity, order.limitPrice, order.stopPrice);
+    }, 0);
   return {
     equityCents,
     cashCents: account.cashCents,
     peakEquityCents: Math.max(account.peakEquityCents, equityCents),
     dayStartEquityCents: account.dayStartEquityCents,
     weekStartEquityCents: account.weekStartEquityCents,
-    openPositions: open.length,
+    openPositions: open.length + workingEntries.length,
     openRiskCents,
     tradesToday: session.tradesTaken,
     consecutiveLosses: session.consecutiveLosses,
@@ -170,7 +184,7 @@ async function riskState(account: Account, session: StrategySession, equityCents
     lastTradeShares: session.lastTradeShares,
     agentPaused: account.agentPaused,
     haltReason: account.haltReason,
-    spyPositionOpen: open.some((trade) => trade.symbol === TRADABLE_SYMBOL),
+    spyPositionOpen: open.some((trade) => trade.symbol === TRADABLE_SYMBOL) || workingEntries.length > 0,
     shortingEnabled: account.shortingEnabled,
     dayTradesInPdtWindow: await dayTradeCount(account.id, clock.dateKey),
   };
@@ -202,7 +216,15 @@ async function snapshot(accountId: string, equityCents: number, cashCents: numbe
   });
 }
 
-async function closeTrade(trade: Trade, exitPrice: number, purpose: string, now: Date) {
+async function closeTrade(
+  trade: Trade,
+  exitPrice: number,
+  purpose: string,
+  now: Date,
+  options?: { adjustCash?: boolean; recordExitOrder?: boolean },
+) {
+  const adjustCash = options?.adjustCash !== false;
+  const recordExitOrder = options?.recordExitOrder !== false;
   assertAgentExit({
     symbol: trade.symbol,
     quantity: trade.quantity,
@@ -235,21 +257,23 @@ async function closeTrade(trade: Trade, exitPrice: number, purpose: string, now:
   await prisma.$transaction(async (tx) => {
     const current = await tx.trade.findUnique({ where: { id: trade.id } });
     if (!current || current.status !== "OPEN") return;
-    await tx.order.create({
-      data: {
-        accountId: trade.accountId,
-        tradeId: trade.id,
-        symbol: trade.symbol,
-        side: trade.side === "LONG" ? "SELL" : "BUY",
-        type: purpose === "STOP" ? "STOP" : "MARKET",
-        purpose,
-        quantity: trade.quantity,
-        stopPrice: purpose === "STOP" ? trade.stopPrice : null,
-        fillPrice: price,
-        status: "FILLED",
-        filledAt: now,
-      },
-    });
+    if (recordExitOrder) {
+      await tx.order.create({
+        data: {
+          accountId: trade.accountId,
+          tradeId: trade.id,
+          symbol: trade.symbol,
+          side: trade.side === "LONG" ? "SELL" : "BUY",
+          type: purpose === "STOP" ? "STOP" : "MARKET",
+          purpose,
+          quantity: trade.quantity,
+          stopPrice: purpose === "STOP" ? trade.stopPrice : null,
+          fillPrice: price,
+          status: "FILLED",
+          filledAt: now,
+        },
+      });
+    }
     await tx.order.updateMany({
       where: { tradeId: trade.id, purpose: "STOP", status: "WORKING" },
       data: { status: purpose === "STOP" ? "FILLED" : "CANCELLED", fillPrice: purpose === "STOP" ? price : null, filledAt: now },
@@ -280,10 +304,12 @@ async function closeTrade(trade: Trade, exitPrice: number, purpose: string, now:
         },
       });
     }
-    await tx.account.update({
-      where: { id: trade.accountId },
-      data: { cashCents: { increment: cashDelta } },
-    });
+    if (adjustCash) {
+      await tx.account.update({
+        where: { id: trade.accountId },
+        data: { cashCents: { increment: cashDelta } },
+      });
+    }
     await tx.agentEvent.create({
       data: {
         accountId: trade.accountId,
@@ -343,6 +369,31 @@ async function manageOpenTrades(accountId: string, now: Date) {
 export async function flattenAgentTrades(accountId: string, now = new Date(), purpose = "FLATTEN") {
   const open = await prisma.trade.findMany({ where: { accountId, status: "OPEN", origin: "ENGINE" } });
   const spy = await latestSpy(accountId);
+  if (alpacaPaperConfigured()) {
+    const working = await prisma.order.findMany({
+      where: { accountId, status: "WORKING", brokerOrderId: { not: null } },
+    });
+    for (const order of working) {
+      if (!order.brokerOrderId) continue;
+      try {
+        await cancelPaperOrder(order.brokerOrderId);
+      } catch {
+        // A missing or already-closed order should not block the flatten.
+      }
+      await prisma.order.update({ where: { id: order.id }, data: { status: "CANCELLED" } });
+    }
+    for (const trade of open) {
+      assertAgentExit({
+        symbol: trade.symbol,
+        quantity: trade.quantity,
+        agentQuantity: trade.quantity,
+        baselineQuantity: 0,
+      });
+      await sellPaperShares(trade.quantity);
+      await closeTrade(trade, spy?.close ?? trade.entryPrice, purpose, now, { adjustCash: false });
+    }
+    return open.length;
+  }
   for (const trade of open) {
     await closeTrade(trade, spy?.close ?? trade.entryPrice, purpose, now);
   }
@@ -396,6 +447,49 @@ async function executeProposal(
   const cost = notionalCents(decision.shares, fill);
   if (proposal.side !== "LONG") {
     await logEvent(account.id, "RISK_BLOCK", "Live and paper execution are long-only.", "warn");
+    return;
+  }
+
+  if (alpacaPaperConfigured()) {
+    try {
+      const placed = await placePaperBracket({
+        symbol: proposal.symbol,
+        quantity: decision.shares,
+        limitPrice: proposal.entryPrice,
+        stopPrice: proposal.stopPrice,
+        targetPrice: proposal.targetPrice,
+        clientOrderId: `uriel-${proposal.signalBarTs}`,
+      });
+      await prisma.order.create({
+        data: {
+          accountId: account.id,
+          symbol: proposal.symbol,
+          side: "BUY",
+          type: "LIMIT",
+          purpose: "ENTRY",
+          quantity: decision.shares,
+          limitPrice: proposal.entryPrice,
+          stopPrice: proposal.stopPrice,
+          status: "WORKING",
+          brokerOrderId: placed.id,
+        },
+      });
+      await prisma.strategySession.update({
+        where: { id: session.id },
+        data: { tradesTaken: { increment: 1 }, lastSignalBarTs: new Date(proposal.signalBarTs) },
+      });
+      await logEvent(
+        account.id,
+        "ENTRY",
+        `Submitted ${decision.shares} SPY to Alpaca paper. Limit ${proposal.entryPrice.toFixed(2)}, stop ${proposal.stopPrice.toFixed(2)}.`,
+      );
+    } catch (error) {
+      await prisma.strategySession.update({
+        where: { id: session.id },
+        data: { lastSignalBarTs: new Date(proposal.signalBarTs) },
+      });
+      await logEvent(account.id, "BROKER", error instanceof Error ? error.message : "Alpaca paper rejected the order.", "warn");
+    }
     return;
   }
 
@@ -467,10 +561,129 @@ async function executeProposal(
   });
 }
 
+const CLOSED_ORDER = new Set(["canceled", "expired", "rejected", "replaced", "done_for_day"]);
+
+async function reconcileAlpaca(accountId: string, now: Date) {
+  const entries = await prisma.order.findMany({
+    where: { accountId, status: "WORKING", purpose: "ENTRY", brokerOrderId: { not: null } },
+  });
+  for (const order of entries) {
+    if (!order.brokerOrderId || order.limitPrice == null || order.stopPrice == null) continue;
+    const remote = await getPaperOrder(order.brokerOrderId);
+    if (remote.status === "filled") {
+      const fill = roundPrice(Number(remote.filled_avg_price ?? order.limitPrice));
+      const stopLeg = remote.legs?.find((leg) => leg.type === "stop" || leg.stop_price);
+      const targetLeg = remote.legs?.find((leg) => leg.type === "limit" && leg.side === "sell");
+      const stop = roundPrice(Number(stopLeg?.stop_price ?? order.stopPrice));
+      const risk = Math.max(0.01, fill - stop);
+      const target = roundPrice(Number(targetLeg?.limit_price ?? fill + risk * 1.5));
+      const trade = await prisma.trade.create({
+        data: {
+          accountId,
+          symbol: order.symbol,
+          side: "LONG",
+          quantity: Number(remote.filled_qty ?? order.quantity),
+          entryPrice: fill,
+          stopPrice: stop,
+          initialStopPrice: stop,
+          targetPrice: target,
+          status: "OPEN",
+          setup: "ORB_LONG",
+          strategy: STRATEGY_ID,
+          origin: "ENGINE",
+          openedAt: now,
+        },
+      });
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { status: "FILLED", fillPrice: fill, filledAt: now, tradeId: trade.id },
+      });
+      for (const leg of remote.legs ?? []) {
+        if (!leg.id) continue;
+        const purpose = leg.type === "stop" || leg.stop_price ? "STOP" : "TARGET";
+        await prisma.order.create({
+          data: {
+            accountId,
+            tradeId: trade.id,
+            symbol: order.symbol,
+            side: "SELL",
+            type: purpose === "STOP" ? "STOP" : "LIMIT",
+            purpose,
+            quantity: trade.quantity,
+            stopPrice: purpose === "STOP" ? stop : null,
+            limitPrice: purpose === "TARGET" ? target : null,
+            status: "WORKING",
+            brokerOrderId: leg.id,
+          },
+        });
+      }
+      await logEvent(accountId, "ENTRY", `Alpaca paper filled ${trade.quantity} SPY at ${fill.toFixed(2)}.`);
+    } else if (CLOSED_ORDER.has(remote.status)) {
+      await prisma.order.update({
+        where: { id: order.id },
+        data: { status: "CANCELLED", rejectReason: remote.status },
+      });
+      await logEvent(accountId, "BROKER", `Alpaca paper entry ${remote.status}.`, "warn");
+    }
+  }
+
+  const legs = await prisma.order.findMany({
+    where: { accountId, status: "WORKING", purpose: { in: ["STOP", "TARGET"] }, brokerOrderId: { not: null } },
+  });
+  for (const leg of legs) {
+    if (!leg.brokerOrderId || !leg.tradeId) continue;
+    const remote = await getPaperOrder(leg.brokerOrderId);
+    if (remote.status !== "filled") continue;
+    const trade = await prisma.trade.findUnique({ where: { id: leg.tradeId } });
+    if (!trade || trade.status !== "OPEN") continue;
+    const fill = roundPrice(Number(remote.filled_avg_price ?? leg.stopPrice ?? leg.limitPrice ?? trade.stopPrice));
+    await prisma.order.update({
+      where: { id: leg.id },
+      data: { status: "FILLED", fillPrice: fill, filledAt: now },
+    });
+    await closeTrade(trade, fill, leg.purpose, now, { adjustCash: false, recordExitOrder: false });
+  }
+
+  const open = await prisma.trade.findMany({ where: { accountId, status: "OPEN", origin: "ENGINE" } });
+  if (open.length === 0) return;
+  const clock = sessionClock(now);
+  const bars = await prisma.marketBar.findMany({
+    where: { accountId, symbol: TRADABLE_SYMBOL, ts: { gte: new Date(`${clock.dateKey}T00:00:00Z`) } },
+    orderBy: { ts: "asc" },
+  });
+  for (const trade of open) {
+    let stop = trade.stopPrice;
+    for (const bar of bars) {
+      if (bar.ts < trade.openedAt || etParts(bar.ts).dateKey !== clock.dateKey) continue;
+      const oneR = trade.entryPrice + (trade.entryPrice - trade.initialStopPrice);
+      if (bar.high < oneR) continue;
+      const change = stopChangeAllowed("LONG", trade.entryPrice, stop, trade.entryPrice);
+      if (change.ok) stop = trade.entryPrice;
+    }
+    if (Math.abs(stop - trade.stopPrice) <= 0.001) continue;
+    const stopOrder = await prisma.order.findFirst({
+      where: { tradeId: trade.id, purpose: "STOP", status: "WORKING", brokerOrderId: { not: null } },
+    });
+    if (!stopOrder?.brokerOrderId) continue;
+    await replacePaperStop(stopOrder.brokerOrderId, stop);
+    await prisma.trade.update({ where: { id: trade.id }, data: { stopPrice: stop } });
+    await prisma.order.update({ where: { id: stopOrder.id }, data: { stopPrice: stop } });
+    await logEvent(accountId, "STOP", `Stop tightened to ${stop.toFixed(2)} on ${trade.quantity} ${trade.symbol}.`);
+  }
+}
+
 export async function tick(now = new Date()): Promise<{ ok: true; beat: Heartbeat } | { ok: false; reason: string }> {
-  const account = await prisma.account.findFirst();
+  let account = await prisma.account.findFirst();
   if (!account) return { ok: false, reason: "No account" };
   const clock = sessionClock(now);
+  if (alpacaPaperConfigured()) {
+    try {
+      await syncAlpacaPaper(account.id, now);
+      account = await prisma.account.findUniqueOrThrow({ where: { id: account.id } });
+    } catch (error) {
+      await logEvent(account.id, "BROKER", error instanceof Error ? error.message : "Alpaca paper sync failed.", "warn");
+    }
+  }
   try {
     await refreshMarket(account.id, clock, now);
   } catch (error) {
@@ -509,8 +722,15 @@ export async function tick(now = new Date()): Promise<{ ok: true; beat: Heartbea
     data: { equityCents, peakEquityCents, dayStartEquityCents, dayStartDate, weekStartEquityCents, weekStartDate, haltReason },
   });
 
+  if (account.mode === "ALPACA_PAPER") {
+    try {
+      await reconcileAlpaca(account.id, now);
+    } catch (error) {
+      await logEvent(account.id, "BROKER", error instanceof Error ? error.message : "Alpaca paper reconcile failed.", "warn");
+    }
+  }
   if (clock.tradingDay) {
-    await manageOpenTrades(account.id, now);
+    if (account.mode !== "ALPACA_PAPER") await manageOpenTrades(account.id, now);
     if (haltReason || clock.flattenDue) {
       const session = await ensureSession(account.id, clock.dateKey);
       if (!session.flattened || haltReason) {
@@ -541,10 +761,13 @@ export async function tick(now = new Date()): Promise<{ ok: true; beat: Heartbea
         close: bar.close,
         volume: bar.volume,
       }));
+    const pendingEntry = await prisma.order.count({
+      where: { accountId: account.id, status: "WORKING", purpose: "ENTRY", symbol: TRADABLE_SYMBOL },
+    });
     const view = evaluateOrb({
       now,
       bars,
-      hasOpenPosition: book.trades.length > 0,
+      hasOpenPosition: book.trades.length > 0 || pendingEntry > 0,
       tradesTaken: session.tradesTaken,
       consecutiveLosses: session.consecutiveLosses,
       longStopped: session.longStopped,
