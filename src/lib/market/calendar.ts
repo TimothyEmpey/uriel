@@ -1,4 +1,4 @@
-import { etParts } from "@/lib/market/time";
+import { etInstant, etParts } from "@/lib/market/time";
 
 /** NYSE full closures for 2026. Source: NYSE hours calendar. */
 export const NYSE_HOLIDAYS_2026 = new Set([
@@ -106,6 +106,44 @@ export function weekKey(dateKey: string) {
   const delta = weekday === 0 ? 6 : weekday - 1;
   utc.setUTCDate(utc.getUTCDate() - delta);
   return utc.toISOString().slice(0, 10);
+}
+
+const QUIET_PHASES = new Set<SessionPhase>(["closed", "idle"]);
+
+function shiftDateKey(dateKey: string, days: number) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const cursor = new Date(Date.UTC(year, month - 1, day + days));
+  return cursor.toISOString().slice(0, 10);
+}
+
+/** Next ET clock hour. An exact :00 waits for the following hour. */
+export function nextTopOfHourEt(now: Date) {
+  const z = etParts(now);
+  const intoHour = (z.minute * 60 + z.second) * 1000 + (now.getTime() % 1000);
+  const until = intoHour === 0 ? 60 * 60 * 1000 : 60 * 60 * 1000 - intoHour;
+  return new Date(now.getTime() + until);
+}
+
+/** 9:25 ET on the next session, when the book leaves overnight watch. */
+export function nextSessionWake(now: Date) {
+  const startKey = etParts(now).dateKey;
+  for (let offset = 0; offset < 14; offset += 1) {
+    const key = shiftDateKey(startKey, offset);
+    if (!sessionClock(etInstant(key, 12, 0)).tradingDay) continue;
+    const wake = etInstant(key, 9, 25);
+    if (wake.getTime() > now.getTime()) return wake;
+  }
+  return new Date(now.getTime() + 24 * 60 * 60 * 1000);
+}
+
+/**
+ * Active session: 20s polls. Closed market and overnight: the next ET hour,
+ * or 9:25 ET when that arrives first.
+ */
+export function workerWaitMs(now: Date, elapsedMs = 0) {
+  if (!QUIET_PHASES.has(sessionClock(now).phase)) return Math.max(1_000, 20_000 - elapsedMs);
+  const target = Math.min(nextTopOfHourEt(now).getTime(), nextSessionWake(now).getTime());
+  return Math.max(1_000, target - now.getTime());
 }
 
 export function previousBusinessDays(dateKey: string, count: number) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sessionClock } from "@/lib/market/calendar";
+import { nextSessionWake, nextTopOfHourEt, sessionClock, workerWaitMs } from "@/lib/market/calendar";
 import { etInstant } from "@/lib/market/time";
 import { assertAgentExit, assertTradableSymbol } from "@/lib/broker/firewall";
 import { aggregateEquity } from "@/lib/portfolio/equity";
@@ -178,7 +178,42 @@ describe("calendar", () => {
     expect(sessionClock(etInstant("2026-11-27", 12, 55)).phase).toBe("flatten");
     expect(sessionClock(etInstant("2026-11-27", 10, 0)).entryWindowOpen).toBe(true);
   });
+
+  it("heartbeats on the ET hour while the market is closed, and wakes at 9:25", () => {
+    const saturday = etInstant("2026-10-03", 10, 17);
+    expect(etPartsOf(nextTopOfHourEt(saturday))).toEqual({ dateKey: "2026-10-03", hour: 11, minute: 0 });
+    expect(workerWaitMs(saturday)).toBe(nextTopOfHourEt(saturday).getTime() - saturday.getTime());
+
+    const onTheHour = etInstant("2026-10-03", 10, 0);
+    expect(etPartsOf(nextTopOfHourEt(onTheHour))).toEqual({ dateKey: "2026-10-03", hour: 11, minute: 0 });
+
+    const overnight = etInstant("2026-10-05", 9, 0);
+    expect(etPartsOf(nextSessionWake(overnight))).toEqual({ dateKey: "2026-10-05", hour: 9, minute: 25 });
+    expect(workerWaitMs(overnight)).toBe(nextSessionWake(overnight).getTime() - overnight.getTime());
+
+    expect(workerWaitMs(etInstant("2026-10-05", 10, 0), 0)).toBe(20_000);
+  });
 });
+
+function etPartsOf(date: Date) {
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const pick = (type: Intl.DateTimeFormatPartTypes) => formatted.find((part) => part.type === type)?.value ?? "";
+  let hour = Number(pick("hour"));
+  if (hour === 24) hour = 0;
+  return {
+    dateKey: `${pick("year")}-${pick("month")}-${pick("day")}`,
+    hour,
+    minute: Number(pick("minute")),
+  };
+}
 
 function minute(dateKey: string, hour: number, minuteOfHour: number, close: number, volume: number, low: number, high: number): Bar {
   return {

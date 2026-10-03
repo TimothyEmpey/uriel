@@ -16,11 +16,13 @@ The model is not on the order path. If `XAI_API_KEY` is set, Grok writes one jou
 
 ## Why the worker is cheap to leave on
 
-The hot path is a Node loop: quotes, the playbook, the risk engine, then the paper ledger. It polls about every 20 seconds while the entry window is open and about every 60 seconds overnight, on weekends, and on NYSE holidays. No model call is required for it to trade.
+The hot path is a Node loop: quotes, the playbook, the risk engine, then the paper ledger. It polls about every 20 seconds from 9:25 ET through the flatten. While the market is closed, including overnight, weekends, and NYSE holidays, it heartbeats on the hour in ET and wakes at 9:25 ET for the next session. No model call is required for it to trade.
 
 US equities are not a 24-hour market. The process stays up. It only sends orders from 9:50 to 15:30 ET (12:30 on the two 2026 early closes) and flattens by 15:50 ET.
 
 ## Robinhood
+
+Alpaca paper is the test broker. Set `APCA_API_KEY_ID`, `APCA_API_SECRET_KEY`, and `APCA_API_BASE_URL=https://paper-api.alpaca.markets`. The client refuses any other host. Uriel reads that account’s equity and cash, ignores margin buying power, and sends SPY brackets only after the risk engine approves them.
 
 Robinhood does not give an agent the main brokerage account. The official path is a separate agentic account connected at `https://agent.robinhood.com/mcp/trading`. Put the bearer token in `ROBINHOOD_MCP_TOKEN` when you have one.
 

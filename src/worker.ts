@@ -1,7 +1,6 @@
 import { tick } from "@/server/trading";
-import { sessionClock } from "@/lib/market/calendar";
-
-const ACTIVE = new Set(["preopen", "opening_range", "entry", "manage", "flatten"]);
+import { workerWaitMs } from "@/lib/market/calendar";
+import { formatEt } from "@/lib/market/time";
 
 async function sleep(ms: number) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,10 +20,10 @@ async function loop() {
     } catch (error) {
       console.error(error instanceof Error ? error.message : error);
     }
-    const clock = sessionClock(new Date());
-    const elapsed = Date.now() - started;
-    const wait = (ACTIVE.has(clock.phase) ? 20_000 : 60_000) - elapsed;
-    await sleep(Math.max(1_000, wait));
+    const now = new Date();
+    const wait = workerWaitMs(now, Date.now() - started);
+    if (wait > 60_000) console.log(`Next heartbeat ${formatEt(new Date(now.getTime() + wait))} ET`);
+    await sleep(wait);
   }
 }
 
