@@ -31,7 +31,7 @@ export function DeskShell({
       <LiveRefresh />
       <UrielMark tone={tone} />
       <div className="mx-auto min-h-screen max-w-6xl px-4 pb-24 pt-5 md:pb-10 md:pt-6">
-        <header className="mb-6 flex items-center justify-between gap-3 pr-16 md:pr-24">
+        <header className="mb-6 flex items-center justify-between gap-3 pr-20 md:pr-28">
           <Link href="/" className="text-lg font-semibold tracking-tight">
             Uriel
           </Link>
