@@ -1,17 +1,17 @@
 import { sessionClock } from "@/lib/market/calendar";
 import { RISK_LIMITS, STRATEGY_NAME } from "@/lib/risk/constants";
 import { riskBudgetCents } from "@/lib/risk/sizing";
-import { alpacaPaperConfigured, alpacaStatus, syncAlpacaPaper } from "@/server/alpaca";
+import { alpacaPaperConfigured, alpacaStatus } from "@/server/alpaca";
 import { prisma } from "@/server/db";
 import { robinhoodStatus } from "@/server/robinhood";
-import { readHeartbeat } from "@/server/trading";
+import { alignAlpaca, readHeartbeat } from "@/server/trading";
 
 export async function getDesk() {
   const now = new Date();
   const existing = await prisma.account.findFirst({ select: { id: true } });
   if (existing && alpacaPaperConfigured()) {
     try {
-      await syncAlpacaPaper(existing.id, now);
+      await alignAlpaca(existing.id, now);
     } catch {
       // The page still renders. The broker line shows that the keys are present.
     }

@@ -174,9 +174,10 @@ model MarketBar {
   open      Float
   high      Float
   low       Float
-  close     Float
-  volume    Int
-  createdAt DateTime @default(now())
+  close      Float
+  volume     Int
+  timeframe  String   @default("1m")
+  createdAt  DateTime @default(now())
 
   @@unique([accountId, symbol, ts])
 }

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Account, Holding, StrategySession, Trade } from "@prisma/client";
 import { assertAgentExit, assertTradableSymbol } from "@/lib/broker/firewall";
+import { isStrategyBar } from "@/lib/market/bars";
 import { previousBusinessDays, sessionClock, weekKey, type SessionClock } from "@/lib/market/calendar";
 import { etParts, roundPrice } from "@/lib/market/time";
 import { accountEquityCents } from "@/lib/portfolio/equity";
@@ -62,7 +63,7 @@ async function latestSpy(accountId: string) {
 async function ingestSymbol(accountId: string, symbol: string, interval: "1m" | "1d", range: string) {
   const bars = await fetchYahooBars(symbol, interval, range);
   const latest = await prisma.marketBar.findFirst({
-    where: { accountId, symbol },
+    where: { accountId, symbol, timeframe: interval },
     orderBy: { ts: "desc" },
   });
   const fresh = bars.filter((bar) => !latest || bar.ts >= latest.ts.getTime());
@@ -79,8 +80,9 @@ async function ingestSymbol(accountId: string, symbol: string, interval: "1m" | 
         low: bar.low,
         close: bar.close,
         volume,
+        timeframe: interval,
       },
-      update: { high: bar.high, low: bar.low, close: bar.close, volume },
+      update: { high: bar.high, low: bar.low, close: bar.close, volume, timeframe: interval },
     });
   }
   return bars.at(-1)?.close ?? null;
@@ -326,10 +328,10 @@ async function manageOpenTrades(accountId: string, now: Date) {
   const clock = sessionClock(now);
   const trades = await prisma.trade.findMany({ where: { accountId, status: "OPEN", origin: "ENGINE" } });
   const bars = await prisma.marketBar.findMany({
-    where: { accountId, symbol: TRADABLE_SYMBOL, ts: { gte: new Date(`${clock.dateKey}T00:00:00Z`) } },
+    where: { accountId, symbol: TRADABLE_SYMBOL, timeframe: "1m", ts: { gte: new Date(`${clock.dateKey}T00:00:00Z`) } },
     orderBy: { ts: "asc" },
   });
-  const today = bars.filter((bar) => etParts(bar.ts).dateKey === clock.dateKey);
+  const today = bars.filter((bar) => isStrategyBar(bar.timeframe) && etParts(bar.ts).dateKey === clock.dateKey);
 
   for (const trade of trades) {
     let stop = trade.initialStopPrice;
@@ -648,7 +650,7 @@ async function reconcileAlpaca(accountId: string, now: Date) {
   if (open.length === 0) return;
   const clock = sessionClock(now);
   const bars = await prisma.marketBar.findMany({
-    where: { accountId, symbol: TRADABLE_SYMBOL, ts: { gte: new Date(`${clock.dateKey}T00:00:00Z`) } },
+    where: { accountId, symbol: TRADABLE_SYMBOL, timeframe: "1m", ts: { gte: new Date(`${clock.dateKey}T00:00:00Z`) } },
     orderBy: { ts: "asc" },
   });
   for (const trade of open) {
@@ -672,26 +674,31 @@ async function reconcileAlpaca(accountId: string, now: Date) {
   }
 }
 
+export async function alignAlpaca(accountId: string, now = new Date()) {
+  await reconcileAlpaca(accountId, now);
+  await syncAlpacaPaper(accountId, now);
+}
+
 export async function tick(now = new Date()): Promise<{ ok: true; beat: Heartbeat } | { ok: false; reason: string }> {
   let account = await prisma.account.findFirst();
   if (!account) return { ok: false, reason: "No account" };
   const clock = sessionClock(now);
-  if (alpacaPaperConfigured()) {
-    try {
-      await syncAlpacaPaper(account.id, now);
-      account = await prisma.account.findUniqueOrThrow({ where: { id: account.id } });
-    } catch (error) {
-      await logEvent(account.id, "BROKER", error instanceof Error ? error.message : "Alpaca paper sync failed.", "warn");
-    }
-  }
   try {
     await refreshMarket(account.id, clock, now);
   } catch (error) {
     await logEvent(account.id, "MARKET", error instanceof Error ? error.message : "Market data failed", "warn");
   }
+  if (alpacaPaperConfigured()) {
+    try {
+      await alignAlpaca(account.id, now);
+      account = await prisma.account.findUniqueOrThrow({ where: { id: account.id } });
+    } catch (error) {
+      await logEvent(account.id, "BROKER", error instanceof Error ? error.message : "Alpaca paper sync failed.", "warn");
+    }
+  }
 
   let book = await loadBook(account.id);
-  let equityCents = book.equityCents;
+  let equityCents = account.mode === "ALPACA_PAPER" ? account.equityCents : book.equityCents;
   const peakEquityCents = Math.max(account.peakEquityCents, equityCents);
   let dayStartEquityCents = account.dayStartEquityCents;
   let dayStartDate = account.dayStartDate;
@@ -722,13 +729,6 @@ export async function tick(now = new Date()): Promise<{ ok: true; beat: Heartbea
     data: { equityCents, peakEquityCents, dayStartEquityCents, dayStartDate, weekStartEquityCents, weekStartDate, haltReason },
   });
 
-  if (account.mode === "ALPACA_PAPER") {
-    try {
-      await reconcileAlpaca(account.id, now);
-    } catch (error) {
-      await logEvent(account.id, "BROKER", error instanceof Error ? error.message : "Alpaca paper reconcile failed.", "warn");
-    }
-  }
   if (clock.tradingDay) {
     if (account.mode !== "ALPACA_PAPER") await manageOpenTrades(account.id, now);
     if (haltReason || clock.flattenDue) {
@@ -748,11 +748,11 @@ export async function tick(now = new Date()): Promise<{ ok: true; beat: Heartbea
   const session = await ensureSession(account.id, clock.dateKey);
   if (clock.entryWindowOpen && book.spy && !account.agentPaused && !haltReason) {
     const stored = await prisma.marketBar.findMany({
-      where: { accountId: account.id, symbol: TRADABLE_SYMBOL },
+      where: { accountId: account.id, symbol: TRADABLE_SYMBOL, timeframe: "1m" },
       orderBy: { ts: "asc" },
     });
     const bars: Bar[] = stored
-      .filter((bar) => etParts(bar.ts).dateKey === clock.dateKey)
+      .filter((bar) => isStrategyBar(bar.timeframe) && etParts(bar.ts).dateKey === clock.dateKey)
       .map((bar) => ({
         ts: bar.ts.getTime(),
         open: bar.open,
@@ -798,14 +798,16 @@ export async function tick(now = new Date()): Promise<{ ok: true; beat: Heartbea
       data: { marketPrice: finalBook.spy },
     });
   }
+  const finalEquity = account.mode === "ALPACA_PAPER" ? account.equityCents : finalBook.equityCents;
+  const finalCash = account.mode === "ALPACA_PAPER" ? account.cashCents : finalBook.account.cashCents;
   await prisma.account.update({
     where: { id: account.id },
     data: {
-      equityCents: finalBook.equityCents,
-      peakEquityCents: Math.max(peakEquityCents, finalBook.equityCents),
+      equityCents: finalEquity,
+      peakEquityCents: Math.max(peakEquityCents, finalEquity),
     },
   });
-  await snapshot(account.id, finalBook.equityCents, finalBook.account.cashCents, finalBook.spy, now);
+  await snapshot(account.id, finalEquity, finalCash, finalBook.spy, now);
 
   const beat: Heartbeat = {
     at: now.toISOString(),

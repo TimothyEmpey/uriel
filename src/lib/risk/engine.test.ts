@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { nextSessionWake, nextTopOfHourEt, sessionClock, workerWaitMs } from "@/lib/market/calendar";
+import { isStrategyBar } from "@/lib/market/bars";
 import { etInstant } from "@/lib/market/time";
 import { assertAgentExit, assertTradableSymbol } from "@/lib/broker/firewall";
 import { aggregateEquity } from "@/lib/portfolio/equity";
@@ -192,6 +193,11 @@ describe("calendar", () => {
     expect(workerWaitMs(overnight)).toBe(nextSessionWake(overnight).getTime() - overnight.getTime());
 
     expect(workerWaitMs(etInstant("2026-10-05", 10, 0), 0)).toBe(20_000);
+  });
+
+  it("keeps daily prints out of the opening range", () => {
+    expect(isStrategyBar("1m")).toBe(true);
+    expect(isStrategyBar("1d")).toBe(false);
   });
 });
 
