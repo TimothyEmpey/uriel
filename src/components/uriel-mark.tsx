@@ -15,7 +15,7 @@ type Pose =
   | "walk-left"
   | "disappointed";
 
-const art = "?v=3";
+const art = "?v=4";
 
 const sprite: Record<Pose, string> = {
   idle: `/uriel/idle.png${art}`,
