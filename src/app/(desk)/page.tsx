@@ -45,9 +45,7 @@ export default async function DashboardPage() {
           <StatusRow label="Broker" value={desk.mode === "ALPACA_PAPER" ? "Alpaca paper" : desk.mode === "PAPER" ? "Paper ledger" : "Robinhood"} />
           <StatusRow label="Alpaca" value={desk.alpaca.configured ? "Paper connected" : "Not connected"} />
           <p className="text-xs leading-5 text-[var(--muted)]">{desk.alpaca.configured ? desk.alpaca.detail : desk.robinhood.detail}</p>
-          {desk.session?.orHigh && desk.session.orLow ? (
-            <p className="text-sm">Opening range {formatPx(desk.session.orLow)} – {formatPx(desk.session.orHigh)}</p>
-          ) : null}
+          {desk.session?.vwap ? <p className="text-sm">VWAP {formatPx(desk.session.vwap)}</p> : null}
           {desk.session?.standDown ? <p className="text-sm">{desk.session.standDown}</p> : null}
         </Card>
       </section>

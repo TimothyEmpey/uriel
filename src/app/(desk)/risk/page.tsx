@@ -76,7 +76,7 @@ export default async function RiskPage() {
       <Card>
         <CardTitle>Playbook</CardTitle>
         <p className="mt-3 text-sm leading-6">
-          The 2026 SPY playbook is a 15-minute opening range breakout. Uriel waits for a 5-minute close above that range, with volume at least 1.3× the opening pace and price above a rising VWAP. Wide or tiny ranges are skipped. Shorts stay off: 2026 index-breakout losses clustered there, and Robinhood’s agent account places long equity orders. One to three trades, then flat before the close. The model writes a journal line after the fact. It does not choose the order.
+          The playbook is a long-only VWAP pullback. Price holds above a rising VWAP. A 5-minute bar comes back to within 0.04% of that VWAP, then closes up and back above it. Each fresh bar can be its own buy. Shorts stay off. Up to three trades, then flat before the close. Two losses in a row stop new entries. The model writes a journal line after the fact. It does not choose the order.
         </p>
         <ul className="mt-4 space-y-2 text-sm">
           {rules.map((rule) => (

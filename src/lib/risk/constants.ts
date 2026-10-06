@@ -14,5 +14,5 @@ export const PDT_EQUITY_CENTS = 2_500_000;
 export const PDT_MAX_DAY_TRADES = 3;
 export const PDT_WINDOW_BUSINESS_DAYS = 5;
 
-export const STRATEGY_ID = "spy-orb-15-vwap-2026";
-export const STRATEGY_NAME = "SPY 15-minute ORB, VWAP and volume, long-only";
+export const STRATEGY_ID = "spy-vwap-pullback-2026";
+export const STRATEGY_NAME = "SPY VWAP pullback, long-only";

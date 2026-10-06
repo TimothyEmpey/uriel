@@ -8,7 +8,7 @@ This is trading software, not investment advice. You can lose money.
 
 ## Playbook
 
-15-minute opening range on SPY, confirmed by a 5-minute close, volume of at least 1.3× the opening pace, and a rising VWAP. The range is skipped when it is tiny or event-sized. Shorts stay off: 2026 SPY breakout losses clustered on the short side, and Robinhood’s agent accounts place long equity orders. One to three trades, flat before the close.
+VWAP pullback on SPY. Price holds above a rising VWAP. A 5-minute bar comes back to within 0.04% of that VWAP, then closes up and back above it. That can happen more than once a session, so there are more buys than a single opening-range break, and more of them get stopped. Shorts stay off. Up to three trades, flat before the close. Two losses in a row stop new entries.
 
 The numeric guardrails are unchanged: 2% risk per trade, 5% daily loss, 5% weekly loss, 5% drawdown from peak, 2 open positions, 4% combined open risk, 3 trades a day. Stops are required before entry and cannot be widened. Size is `floor(equity × 2% / stop distance)`.
 

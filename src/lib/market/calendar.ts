@@ -78,7 +78,7 @@ export function sessionClock(now: Date): SessionClock {
   const labels: Record<SessionPhase, string> = {
     idle: "Overnight watch",
     preopen: "Session baseline",
-    opening_range: "Building the opening range",
+    opening_range: "Session open",
     entry: "Entry window",
     manage: "Managing open risk",
     flatten: "Flattening day trades",

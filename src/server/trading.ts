@@ -11,7 +11,7 @@ import { evaluateRisk, haltReasonForState } from "@/lib/risk/engine";
 import { dollarRiskCents, notionalCents, sharesForRisk } from "@/lib/risk/sizing";
 import { stopChangeAllowed } from "@/lib/risk/stops";
 import type { RiskState, Side } from "@/lib/risk/types";
-import { evaluateOrb, type Bar } from "@/lib/strategy/orb";
+import { evaluateVwapPullback, type Bar, type PullbackProposal } from "@/lib/strategy/vwap-pullback";
 import { prisma } from "@/server/db";
 import { deterministicJournal, maybeNarrate } from "@/server/journal";
 import {
@@ -427,7 +427,7 @@ async function executeProposal(
   session: StrategySession,
   equityCents: number,
   clock: SessionClock,
-  proposal: NonNullable<ReturnType<typeof evaluateOrb>["proposal"]>,
+  proposal: PullbackProposal,
   spy: number,
   now: Date,
 ) {
@@ -610,7 +610,7 @@ async function reconcileAlpaca(accountId: string, now: Date) {
           initialStopPrice: stop,
           targetPrice: target,
           status: "OPEN",
-          setup: "ORB_LONG",
+          setup: "VWAP_PULLBACK",
           strategy: STRATEGY_ID,
           origin: "ENGINE",
           openedAt: now,
@@ -784,13 +784,12 @@ export async function tick(now = new Date()): Promise<{ ok: true; beat: Heartbea
     const pendingEntry = await prisma.order.count({
       where: { accountId: account.id, status: "WORKING", purpose: "ENTRY", symbol: TRADABLE_SYMBOL },
     });
-    const view = evaluateOrb({
+    const view = evaluateVwapPullback({
       now,
       bars,
       hasOpenPosition: book.trades.length > 0 || pendingEntry > 0,
       tradesTaken: session.tradesTaken,
       consecutiveLosses: session.consecutiveLosses,
-      longStopped: session.longStopped,
     });
     await prisma.strategySession.update({
       where: { id: session.id },
