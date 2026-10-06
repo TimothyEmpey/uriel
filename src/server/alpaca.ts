@@ -105,6 +105,15 @@ function dollarsToCents(value: string | undefined) {
   return Math.round(amount * 100);
 }
 
+/** Read equity and cash. Does not place or change an order. */
+export async function getPaperBalances() {
+  const remote = await alpacaFetch<AlpacaAccount>("/v2/account");
+  return {
+    equityCents: dollarsToCents(remote.equity),
+    cashCents: dollarsToCents(remote.cash),
+  };
+}
+
 async function alpacaFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const key = process.env.APCA_API_KEY_ID;
   const secret = process.env.APCA_API_SECRET_KEY;

@@ -1,0 +1,132 @@
+#!/bin/bash
+# Account commands, plus start and stop for the worker and the desk.
+set -euo pipefail
+source="${BASH_SOURCE[0]}"
+while [ -L "$source" ]; do
+  dir="$(cd "$(dirname "$source")" && pwd)"
+  source="$(readlink "$source")"
+  [[ "$source" != /* ]] && source="$dir/$source"
+done
+root="$(cd "$(dirname "$source")/.." && pwd)"
+cd "$root"
+set -a
+# shellcheck disable=SC1091
+source "$root/.env"
+set +a
+
+worker_pids() {
+  pgrep -f 'src/worker\.ts' || true
+}
+
+desk_pids() {
+  {
+    pgrep -f "$root/node_modules/.bin/next dev" || true
+    lsof -nP -iTCP:3000 -sTCP:LISTEN -t 2>/dev/null || true
+  } | awk 'NF' | sort -u
+}
+
+desk_listening() {
+  lsof -nP -iTCP:3000 -sTCP:LISTEN -t 2>/dev/null || true
+}
+
+# Include npm and the shell that launched this repo's desk, so the server cannot respawn.
+desk_tree() {
+  local pid ppid cmd
+  desk_pids | while read -r pid; do
+    echo "$pid"
+    ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    while [[ -n "$ppid" && "$ppid" != "1" ]]; do
+      cmd="$(ps -o command= -p "$ppid" 2>/dev/null || true)"
+      [[ "$cmd" == *"npm run dev"* || "$cmd" == *"next dev"* ]] || break
+      echo "$ppid"
+      ppid="$(ps -o ppid= -p "$ppid" 2>/dev/null | tr -d ' ' || true)"
+    done
+  done | awk 'NF' | sort -u
+}
+
+stop_pids() {
+  local pids="$1"
+  [[ -n "$pids" ]] || return 0
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    sleep 0.2
+    [[ -z "$2" ]] && return 0
+    pids="$($2)"
+    [[ -z "$pids" ]] && return 0
+  done
+  # shellcheck disable=SC2086
+  kill -9 $pids 2>/dev/null || true
+}
+
+start_worker() {
+  if [[ -n "$(worker_pids)" ]]; then
+    echo "Uriel worker is already running."
+    return
+  fi
+  mkdir -p "$root/data"
+  nohup "$root/node_modules/.bin/tsx" --tsconfig "$root/tsconfig.json" "$root/src/worker.ts" >>"$root/data/worker.log" 2>&1 &
+  echo $! >"$root/data/worker.pid"
+  echo "Uriel worker started."
+}
+
+start_desk() {
+  if [[ -n "$(desk_listening)" ]]; then
+    echo "Desk is already running at http://localhost:3000"
+    return
+  fi
+  if [[ -z "$(pgrep -f "$root/node_modules/.bin/next dev" || true)" ]]; then
+    mkdir -p "$root/data"
+    nohup npm run dev >>"$root/data/desk.log" 2>&1 &
+    echo $! >"$root/data/desk.pid"
+  fi
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    sleep 0.4
+    if [[ -n "$(desk_listening)" ]]; then
+      echo "Desk started at http://localhost:3000"
+      return
+    fi
+  done
+  echo "Desk did not open port 3000. See data/desk.log." >&2
+  exit 1
+}
+
+stop_worker() {
+  local pids
+  pids="$(worker_pids)"
+  if [[ -z "$pids" ]]; then
+    rm -f "$root/data/worker.pid"
+    echo "Uriel worker is not running."
+    return
+  fi
+  stop_pids "$pids" worker_pids
+  rm -f "$root/data/worker.pid"
+  echo "Uriel worker stopped."
+}
+
+stop_desk() {
+  local pids
+  pids="$(desk_tree)"
+  if [[ -z "$pids" ]]; then
+    rm -f "$root/data/desk.pid"
+    echo "Desk is not running."
+    return
+  fi
+  stop_pids "$pids" desk_pids
+  rm -f "$root/data/desk.pid"
+  echo "Desk stopped."
+}
+
+command_name="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+if [[ "$command_name" == "start" ]]; then
+  start_worker
+  start_desk
+  exit 0
+fi
+if [[ "$command_name" == "end" || "$command_name" == "stop" ]]; then
+  stop_worker
+  stop_desk
+  exit 0
+fi
+
+exec "$root/node_modules/.bin/tsx" --tsconfig "$root/tsconfig.json" "$root/src/cli.ts" "$@"

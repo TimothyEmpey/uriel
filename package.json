@@ -2,6 +2,9 @@
   "name": "uriel",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "uriel": "./bin/uriel"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "prisma generate && next build --turbopack",
