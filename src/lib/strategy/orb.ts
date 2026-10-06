@@ -188,11 +188,17 @@ export function evaluateOrb(context: OrbContext): OrbSnapshot {
   const latest = signalBars.at(-1);
   if (!latest) return { ...empty("Waiting for a completed 5-minute bar.", base) };
 
-  const crossIndex = signalBars.findIndex((bar, index) => {
+  // The latest cross, not the first one of the day. A close back through the
+  // range and then above it again is a new breakout, up to the daily trade cap.
+  let cross: Bar | null = null;
+  for (let index = signalBars.length - 1; index >= 0; index -= 1) {
+    const bar = signalBars[index];
     const previous = signalBars[index - 1];
-    return bar.close > orHigh && (previous == null || previous.close <= orHigh);
-  });
-  const cross = crossIndex >= 0 ? signalBars[crossIndex] : null;
+    if (bar.close > orHigh && (previous == null || previous.close <= orHigh)) {
+      cross = bar;
+      break;
+    }
+  }
   if (!cross || latest.close <= orHigh) {
     return { ...empty("No fresh close above the opening range.", base) };
   }

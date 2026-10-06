@@ -23,10 +23,15 @@ export async function fetchYahooBars(symbol: string, interval: "1m" | "1d", rang
   const quote = result?.indicators?.quote?.[0] ?? {};
   const bars: Bar[] = [];
   for (let index = 0; index < timestamps.length; index += 1) {
+    const stamp = timestamps[index];
+    // The chart adds one live print after the finished candles. It is stamped
+    // mid-minute, with the last price in every field and no volume. Keeping it
+    // makes the algorithm blind to the real bars.
+    if (interval === "1m" && stamp % 60 !== 0) continue;
     const close = quote.close?.[index];
     if (close == null) continue;
     bars.push({
-      ts: timestamps[index] * 1000,
+      ts: stamp * 1000,
       open: quote.open?.[index] ?? close,
       high: quote.high?.[index] ?? close,
       low: quote.low?.[index] ?? close,

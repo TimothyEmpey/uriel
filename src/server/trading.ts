@@ -67,6 +67,15 @@ async function latestSpy(accountId: string) {
 
 async function ingestSymbol(accountId: string, symbol: string, interval: "1m" | "1d", range: string, all = false) {
   const bars = await fetchYahooBars(symbol, interval, range);
+  if (interval === "1m") {
+    await prisma.$executeRaw`
+      DELETE FROM "MarketBar"
+      WHERE "accountId" = ${accountId}
+        AND symbol = ${symbol}
+        AND timeframe = '1m'
+        AND EXTRACT(SECOND FROM ts) <> 0
+    `;
+  }
   const latest = await prisma.marketBar.findFirst({
     where: { accountId, symbol, timeframe: interval },
     orderBy: { ts: "desc" },

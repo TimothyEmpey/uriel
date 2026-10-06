@@ -245,6 +245,14 @@ function minute(dateKey: string, hour: number, minuteOfHour: number, close: numb
   };
 }
 
+function span(dateKey: string, from: number, to: number, close: number, volume: number, low: number, high: number) {
+  const bars: Bar[] = [];
+  for (let minuteOfDay = from; minuteOfDay < to; minuteOfDay += 1) {
+    bars.push(minute(dateKey, Math.floor(minuteOfDay / 60), minuteOfDay % 60, close, volume, low, high));
+  }
+  return bars;
+}
+
 function sessionBars(dateKey: string): Bar[] {
   const bars: Bar[] = [];
   for (let minuteOfDay = 9 * 60 + 30; minuteOfDay < 9 * 60 + 45; minuteOfDay += 1) {
@@ -285,6 +293,41 @@ describe("SPY opening range", () => {
       longStopped: false,
     });
     expect(decision.proposal).toBeNull();
+  });
+
+  it("takes a later fresh cross after price falls back under the range", () => {
+    const bars = [
+      ...sessionBars("2026-10-02"),
+      ...span("2026-10-02", 9 * 60 + 50, 9 * 60 + 55, 100, 1_000, 99.9, 100.05),
+      ...span("2026-10-02", 10 * 60, 10 * 60 + 5, 100.5, 1_800, 100.3, 100.6),
+    ];
+    const decision = evaluateOrb({
+      now: etInstant("2026-10-02", 10, 5),
+      bars,
+      hasOpenPosition: false,
+      tradesTaken: 1,
+      consecutiveLosses: 0,
+      longStopped: false,
+    });
+    expect(decision.proposal?.side).toBe("LONG");
+    expect(decision.proposal?.signalBarTs).toBe(etInstant("2026-10-02", 10, 4).getTime());
+  });
+
+  it("does not chase the original cross once it is older than 10 minutes", () => {
+    const bars = [
+      ...sessionBars("2026-10-02"),
+      ...span("2026-10-02", 9 * 60 + 50, 10 * 60 + 5, 100.4, 1_800, 100.2, 100.55),
+    ];
+    const decision = evaluateOrb({
+      now: etInstant("2026-10-02", 10, 5),
+      bars,
+      hasOpenPosition: false,
+      tradesTaken: 0,
+      consecutiveLosses: 0,
+      longStopped: false,
+    });
+    expect(decision.proposal).toBeNull();
+    expect(decision.note).toMatch(/stale/i);
   });
 
   it("stands down when the opening range is an event bar", () => {
