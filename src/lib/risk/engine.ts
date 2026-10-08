@@ -53,6 +53,11 @@ export function evaluateRisk(proposal: TradeProposal, state: RiskState): RiskDec
   if (!Number.isInteger(shares) || shares < 1) {
     reasons.push("Position size must be a whole number of shares.");
   }
+  let heldToLastLoss = false;
+  if (state.lastTradeWasLoss && state.lastTradeShares != null && state.lastTradeShares >= 1 && shares > state.lastTradeShares) {
+    shares = state.lastTradeShares;
+    heldToLastLoss = true;
+  }
   if (shares > maxShares) {
     reasons.push("Position size exceeds the risk formula.");
   }
@@ -67,9 +72,6 @@ export function evaluateRisk(proposal: TradeProposal, state: RiskState): RiskDec
   }
   if (state.consecutiveLosses >= 2) {
     reasons.push("Revenge-trading lockout after two consecutive losses.");
-  }
-  if (state.lastTradeWasLoss && state.lastTradeShares != null && shares > state.lastTradeShares) {
-    reasons.push("No doubling after a loss.");
   }
   if (state.agentPaused) reasons.push("Uriel is paused.");
   if (state.haltReason) reasons.push(`Trading halted: ${state.haltReason}`);
@@ -108,6 +110,7 @@ export function evaluateRisk(proposal: TradeProposal, state: RiskState): RiskDec
     } else {
       shares = fitted;
     }
+    if (heldToLastLoss) reasons.push("Position size reduced to the previous losing trade.");
   }
 
   const riskCents = dollarRiskCents(Math.max(shares, 0), proposal.entryPrice, proposal.stopPrice);

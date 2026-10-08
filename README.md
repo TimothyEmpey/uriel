@@ -8,9 +8,9 @@ This is trading software, not investment advice. You can lose money.
 
 ## Playbook
 
-VWAP pullback on SPY. Price holds above a rising VWAP. A 5-minute bar comes back to within 0.04% of that VWAP, then closes up and back above it. That can happen more than once a session, so there are more buys than a single opening-range break, and more of them get stopped. Shorts stay off. Up to three trades, flat before the close. Two losses in a row stop new entries.
+Trend pullback on SPY. Price holds above a rising VWAP. A 5-minute bar dips and closes back up. One buy a day. The stop is at least 1% under the entry, or beyond the dip if the dip is deeper. The target is twice that distance, about 2% when the stop is at the minimum. A deep dip is not skipped. The risk engine buys fewer shares. Shorts stay off. Flat before the close.
 
-The numeric guardrails are unchanged: 2% risk per trade, 5% daily loss, 5% weekly loss, 5% drawdown from peak, 2 open positions, 4% combined open risk, 3 trades a day. Stops are required before entry and cannot be widened. Size is `floor(equity × 2% / stop distance)`.
+The account limits are 2% risk per trade, 5% daily loss, 5% weekly loss, 5% drawdown from peak, 2 open positions, 4% combined open risk, and 1 trade a day. Stops are required before entry and cannot be widened. Size is `floor(equity × 2% / stop distance)`, then cut to cash. After a loss, the next buy is capped at that losing size.
 
 The model is not on the order path. If `XAI_API_KEY` is set, Grok writes one journal sentence after a closed trade, at most three times a day.
 

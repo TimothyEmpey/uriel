@@ -6,12 +6,12 @@ import { isStrategyBar } from "@/lib/market/bars";
 import { previousBusinessDays, sessionClock, weekKey, type SessionClock } from "@/lib/market/calendar";
 import { etParts, roundPrice } from "@/lib/market/time";
 import { accountEquityCents } from "@/lib/portfolio/equity";
-import { STRATEGY_ID, TRADABLE_SYMBOL } from "@/lib/risk/constants";
+import { RISK_LIMITS, STRATEGY_ID, TRADABLE_SYMBOL } from "@/lib/risk/constants";
 import { evaluateRisk, haltReasonForState } from "@/lib/risk/engine";
 import { dollarRiskCents, notionalCents, sharesForRisk } from "@/lib/risk/sizing";
 import { stopChangeAllowed } from "@/lib/risk/stops";
 import type { RiskState, Side } from "@/lib/risk/types";
-import { evaluateVwapPullback, type Bar, type PullbackProposal } from "@/lib/strategy/vwap-pullback";
+import { evaluateTrendPullback, type Bar, type TrendProposal } from "@/lib/strategy/trend-pullback";
 import { prisma } from "@/server/db";
 import { deterministicJournal, maybeNarrate } from "@/server/journal";
 import {
@@ -277,8 +277,18 @@ async function closeTrade(
   const cashDelta = trade.side === "LONG" ? notionalCents(trade.quantity, price) : -notionalCents(trade.quantity, price);
 
   await prisma.$transaction(async (tx) => {
-    const current = await tx.trade.findUnique({ where: { id: trade.id } });
-    if (!current || current.status !== "OPEN") return;
+    const closed = await tx.trade.updateMany({
+      where: { id: trade.id, status: "OPEN" },
+      data: {
+        status: "CLOSED",
+        exitPrice: price,
+        realizedPnlCents: pnl,
+        rMultiple: risk > 0 ? moved / risk : null,
+        closedAt: now,
+        journal: narrative ? `${summary} ${narrative}` : summary,
+      },
+    });
+    if (closed.count !== 1) return;
     if (recordExitOrder) {
       await tx.order.create({
         data: {
@@ -299,17 +309,6 @@ async function closeTrade(
     await tx.order.updateMany({
       where: { tradeId: trade.id, purpose: "STOP", status: "WORKING" },
       data: { status: purpose === "STOP" ? "FILLED" : "CANCELLED", fillPrice: purpose === "STOP" ? price : null, filledAt: now },
-    });
-    await tx.trade.update({
-      where: { id: trade.id },
-      data: {
-        status: "CLOSED",
-        exitPrice: price,
-        realizedPnlCents: pnl,
-        rMultiple: risk > 0 ? moved / risk : null,
-        closedAt: now,
-        journal: narrative ? `${summary} ${narrative}` : summary,
-      },
     });
     const session = await tx.strategySession.findUnique({
       where: { accountId_sessionDate: { accountId: trade.accountId, sessionDate: etParts(trade.openedAt).dateKey } },
@@ -427,7 +426,7 @@ async function executeProposal(
   session: StrategySession,
   equityCents: number,
   clock: SessionClock,
-  proposal: PullbackProposal,
+  proposal: TrendProposal,
   spy: number,
   now: Date,
 ) {
@@ -598,48 +597,64 @@ async function reconcileAlpaca(accountId: string, now: Date) {
       const targetLeg = remote.legs?.find((leg) => leg.type === "limit" && leg.side === "sell");
       const stop = roundPrice(Number(stopLeg?.stop_price ?? order.stopPrice));
       const risk = Math.max(0.01, fill - stop);
-      const target = roundPrice(Number(targetLeg?.limit_price ?? fill + risk * 1.5));
-      const trade = await prisma.trade.create({
-        data: {
-          accountId,
-          symbol: order.symbol,
-          side: "LONG",
-          quantity: Number(remote.filled_qty ?? order.quantity),
-          entryPrice: fill,
-          stopPrice: stop,
-          initialStopPrice: stop,
-          targetPrice: target,
-          status: "OPEN",
-          setup: "VWAP_PULLBACK",
-          strategy: STRATEGY_ID,
-          origin: "ENGINE",
-          openedAt: now,
-        },
-      });
-      await prisma.order.update({
-        where: { id: order.id },
-        data: { status: "FILLED", fillPrice: fill, filledAt: now, tradeId: trade.id },
-      });
-      for (const leg of remote.legs ?? []) {
-        if (!leg.id) continue;
-        const purpose = leg.type === "stop" || leg.stop_price ? "STOP" : "TARGET";
-        await prisma.order.create({
+      const target = roundPrice(Number(targetLeg?.limit_price ?? fill + risk * 2));
+      const quantity = Number(remote.filled_qty ?? order.quantity);
+      await prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id FROM "Order" WHERE id = ${order.id} AND status = 'WORKING' FOR UPDATE
+        `;
+        if (locked.length === 0) return;
+        const trade = await tx.trade.create({
           data: {
             accountId,
-            tradeId: trade.id,
             symbol: order.symbol,
-            side: "SELL",
-            type: purpose === "STOP" ? "STOP" : "LIMIT",
-            purpose,
-            quantity: trade.quantity,
-            stopPrice: purpose === "STOP" ? stop : null,
-            limitPrice: purpose === "TARGET" ? target : null,
-            status: "WORKING",
-            brokerOrderId: leg.id,
+            side: "LONG",
+            quantity,
+            entryPrice: fill,
+            stopPrice: stop,
+            initialStopPrice: stop,
+            targetPrice: target,
+            status: "OPEN",
+            setup: "TREND_PULLBACK",
+            strategy: STRATEGY_ID,
+            origin: "ENGINE",
+            openedAt: now,
           },
         });
-      }
-      await logEvent(accountId, "ENTRY", `Alpaca paper filled ${trade.quantity} SPY at ${fill.toFixed(2)}.`);
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: "FILLED", fillPrice: fill, filledAt: now, tradeId: trade.id },
+        });
+        for (const leg of remote.legs ?? []) {
+          if (!leg.id) continue;
+          const existing = await tx.order.findFirst({ where: { brokerOrderId: leg.id } });
+          if (existing) continue;
+          const purpose = leg.type === "stop" || leg.stop_price ? "STOP" : "TARGET";
+          await tx.order.create({
+            data: {
+              accountId,
+              tradeId: trade.id,
+              symbol: order.symbol,
+              side: "SELL",
+              type: purpose === "STOP" ? "STOP" : "LIMIT",
+              purpose,
+              quantity,
+              stopPrice: purpose === "STOP" ? stop : null,
+              limitPrice: purpose === "TARGET" ? target : null,
+              status: "WORKING",
+              brokerOrderId: leg.id,
+            },
+          });
+        }
+        await tx.agentEvent.create({
+          data: {
+            accountId,
+            kind: "ENTRY",
+            level: "info",
+            message: `Alpaca paper filled ${quantity} SPY at ${fill.toFixed(2)}.`,
+          },
+        });
+      });
     } else if (CLOSED_ORDER.has(remote.status)) {
       await prisma.order.update({
         where: { id: order.id },
@@ -659,10 +674,11 @@ async function reconcileAlpaca(accountId: string, now: Date) {
     const trade = await prisma.trade.findUnique({ where: { id: leg.tradeId } });
     if (!trade || trade.status !== "OPEN") continue;
     const fill = roundPrice(Number(remote.filled_avg_price ?? leg.stopPrice ?? leg.limitPrice ?? trade.stopPrice));
-    await prisma.order.update({
-      where: { id: leg.id },
+    const claimed = await prisma.order.updateMany({
+      where: { id: leg.id, status: "WORKING" },
       data: { status: "FILLED", fillPrice: fill, filledAt: now },
     });
+    if (claimed.count !== 1) continue;
     await closeTrade(trade, fill, leg.purpose, now, { adjustCash: false, recordExitOrder: false });
   }
 
@@ -784,12 +800,13 @@ export async function tick(now = new Date()): Promise<{ ok: true; beat: Heartbea
     const pendingEntry = await prisma.order.count({
       where: { accountId: account.id, status: "WORKING", purpose: "ENTRY", symbol: TRADABLE_SYMBOL },
     });
-    const view = evaluateVwapPullback({
+    const view = evaluateTrendPullback({
       now,
       bars,
       hasOpenPosition: book.trades.length > 0 || pendingEntry > 0,
       tradesTaken: session.tradesTaken,
       consecutiveLosses: session.consecutiveLosses,
+      maxTrades: RISK_LIMITS.maxTradesPerDay,
     });
     await prisma.strategySession.update({
       where: { id: session.id },

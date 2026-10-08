@@ -116,9 +116,9 @@ describe("risk engine", () => {
     expect(evaluateRisk(proposal(), state({ openPositions: 2 })).approved).toBe(false);
     expect(evaluateRisk(proposal(), state({ spyPositionOpen: true })).approved).toBe(false);
     expect(evaluateRisk(proposal(), state({ consecutiveLosses: 2 })).approved).toBe(false);
-    expect(
-      evaluateRisk(proposal({ requestedShares: 40 }), state({ lastTradeWasLoss: true, lastTradeShares: 20 })).approved,
-    ).toBe(false);
+    const afterLoss = evaluateRisk(proposal({ requestedShares: 40 }), state({ lastTradeWasLoss: true, lastTradeShares: 20 }));
+    expect(afterLoss.approved).toBe(true);
+    expect(afterLoss.shares).toBe(20);
     expect(evaluateRisk(proposal(), state({ agentPaused: true })).approved).toBe(false);
   });
 

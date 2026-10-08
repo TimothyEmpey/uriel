@@ -9,9 +9,9 @@ const rules = [
   "Every trade has a stop before the entry is recorded.",
   "A stop can move closer. It cannot move farther away.",
   "Size is floored from 2% of equity divided by the stop distance.",
-  "No averaging down, no martingale, no doubling after a loss.",
+  "No averaging down and no martingale. After a loss the next buy stays at or below that size.",
   "Two losses in a row locks out new entries for the session.",
-  "Three entries a day, two open positions, 4% combined open risk.",
+  "One entry a day, two open positions, 4% combined open risk.",
   "Daily loss, weekly loss, and peak drawdown each halt at 5%.",
   "SPY only. Other symbols and reserved SPY shares are untouchable.",
   "Day trades are flat before the session cutoff.",
@@ -76,7 +76,7 @@ export default async function RiskPage() {
       <Card>
         <CardTitle>Playbook</CardTitle>
         <p className="mt-3 text-sm leading-6">
-          The playbook is a long-only VWAP pullback. Price holds above a rising VWAP. A 5-minute bar comes back to within 0.04% of that VWAP, then closes up and back above it. Each fresh bar can be its own buy. Shorts stay off. Up to three trades, then flat before the close. Two losses in a row stop new entries. The model writes a journal line after the fact. It does not choose the order.
+          The playbook is a long-only trend pullback. Price holds above a rising VWAP. A 5-minute bar dips and closes back up. That is the one buy for the day. The stop is at least 1% under the entry, or past the dip if the dip is deeper, and the target is twice that distance. A wide bar is not skipped. Shorts stay off. The position is flat before the close. The model writes a journal line after the fact. It does not choose the order.
         </p>
         <ul className="mt-4 space-y-2 text-sm">
           {rules.map((rule) => (

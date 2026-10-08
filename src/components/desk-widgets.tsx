@@ -15,7 +15,7 @@ export function BookBanner({ mode, demo }: { mode: string; demo: boolean }) {
   if (mode === "ALPACA_PAPER") {
     return (
       <div className="rounded-2xl border border-[var(--border)] bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] px-4 py-3 text-sm">
-        Alpaca paper account. Equity, cash, and positions come from that account. Sample prints are the old demo book, not Alpaca trades. Uriel sells only SPY shares it buys, and it sizes from cash rather than margin.
+        Alpaca paper account. Equity, cash, and positions come from that account. Uriel sells only SPY shares it buys, and it sizes from cash rather than margin.
       </div>
     );
   }
@@ -130,6 +130,7 @@ export function FillTape({ desk }: { desk: Desk }) {
             <div>
               <div className="flex items-center gap-2">
                 <Badge>{order.side}</Badge>
+                {order.sample ? <Badge>Sample</Badge> : null}
                 <span className="font-medium">{order.symbol}</span>
                 <span className="text-[var(--muted)]">{order.purpose}</span>
               </div>

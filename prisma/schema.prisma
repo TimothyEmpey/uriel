@@ -102,7 +102,7 @@ model Order {
   fillPrice     Float?
   status        String
   rejectReason  String?
-  brokerOrderId String?
+  brokerOrderId String? @unique
   createdAt     DateTime  @default(now())
   filledAt      DateTime?
 }

@@ -11,7 +11,7 @@ export type Bar = {
   volume: number;
 };
 
-export type PullbackContext = {
+export type TrendContext = {
   now: Date;
   bars: Bar[];
   hasOpenPosition: boolean;
@@ -20,19 +20,19 @@ export type PullbackContext = {
   maxTrades?: number;
 };
 
-export type PullbackProposal = {
+export type TrendProposal = {
   symbol: "SPY";
   side: Side;
   entryPrice: number;
   stopPrice: number;
   targetPrice: number;
-  setup: "VWAP_PULLBACK";
+  setup: "TREND_PULLBACK";
   strategy: string;
   reason: string;
   signalBarTs: number;
 };
 
-export type PullbackSnapshot = {
+export type TrendSnapshot = {
   ready: boolean;
   orHigh: number | null;
   orLow: number | null;
@@ -40,17 +40,16 @@ export type PullbackSnapshot = {
   vwap: number | null;
   vwapSlope: number | null;
   standDown: string | null;
-  proposal: PullbackProposal | null;
+  proposal: TrendProposal | null;
   note: string;
 };
 
-const MIN_STOP = 0.05;
-const MAX_STOP_PCT = 0.0065;
-const TARGET_R = 1.5;
+/** Minimum stop under the entry. A tighter 5-minute wick is widened to this. */
+const STOP_PCT = 0.01;
+const TARGET_R = 2;
 const LIMIT_OFFSET = 0.02;
-const VOLUME_FLOOR = 0.5;
-/** A low within 0.04% of VWAP still counts as a tag. On a $780 SPY print that is about $0.31. */
-const VWAP_BAND = 0.0004;
+/** A dip within 0.5% of VWAP still counts. The old 0.04% tag blocked ordinary days. */
+const VWAP_BAND = 0.005;
 
 function aggregate(list: Bar[]): Bar {
   const ordered = [...list].sort((a, b) => a.ts - b.ts);
@@ -94,7 +93,7 @@ function vwapAt(bars: Bar[], dateKey: string, throughMinutes: number) {
   return weighted / volume;
 }
 
-function empty(note: string, extra: Partial<PullbackSnapshot> = {}): PullbackSnapshot {
+function empty(note: string, extra: Partial<TrendSnapshot> = {}): TrendSnapshot {
   return {
     ready: false,
     orHigh: null,
@@ -110,21 +109,20 @@ function empty(note: string, extra: Partial<PullbackSnapshot> = {}): PullbackSna
 }
 
 /**
- * Long-only VWAP pullback. Price is already above a rising session VWAP.
- * The newest completed 5-minute bar comes back to VWAP, then closes up and
- * back above it. Each fresh bar can be its own buy, up to the daily trade
- * cap. This takes more trades than one opening-range break, and it gets
- * stopped more often.
+ * Long-only trend pullback. One SPY buy a day while VWAP is rising.
+ * The stop is at least 1% under the entry, or beyond the dip if that is
+ * farther. The target is twice the stop distance, about 2% when the stop
+ * is at the minimum. A wide dip is not rejected. The risk engine buys
+ * fewer shares instead.
  */
-export function evaluateVwapPullback(context: PullbackContext): PullbackSnapshot {
+export function evaluateTrendPullback(context: TrendContext): TrendSnapshot {
   const z = etParts(context.now);
-  const maxTrades = context.maxTrades ?? 3;
+  const maxTrades = context.maxTrades ?? 1;
   const base = {
     vwap: vwapAt(context.bars, z.dateKey, z.minutes),
     vwapSlope: null as number | null,
   };
   if (context.hasOpenPosition) return { ...empty("An SPY position is already open.", base) };
-  if (context.consecutiveLosses >= 2) return { ...empty("Two losses in a row. Session stands down.", base) };
   if (context.tradesTaken >= maxTrades) return { ...empty("Daily trade cap reached.", base) };
 
   const bars = fiveMinute(context.bars, z.dateKey, z.minutes);
@@ -141,18 +139,18 @@ export function evaluateVwapPullback(context: PullbackContext): PullbackSnapshot
   }
   if (latest.close <= vwap) return { ...empty("Price is not above VWAP.", view) };
 
-  const pulledBack = previous.close > vwap && latest.low <= vwap * (1 + VWAP_BAND);
+  const dipped = previous.close > vwap && (latest.low < previous.close || latest.low <= vwap * (1 + VWAP_BAND));
   const reclaimed = latest.close > latest.open && latest.close > previous.close;
-  const participated = previous.volume <= 0 || latest.volume >= previous.volume * VOLUME_FLOOR;
-  if (!pulledBack || !reclaimed || !participated) {
-    return { ...empty("No VWAP pullback on the latest 5-minute bar.", view) };
+  if (!dipped || !reclaimed) {
+    return { ...empty("No trend pullback on the latest 5-minute bar.", view) };
   }
 
   const entry = roundPrice(latest.close + LIMIT_OFFSET);
-  const stop = roundPrice(latest.low - 0.01);
+  const minimumStop = roundPrice(entry * (1 - STOP_PCT));
+  const beyondDip = roundPrice(latest.low - 0.01);
+  const stop = roundPrice(Math.min(minimumStop, beyondDip));
   const stopDistance = roundPrice(entry - stop);
-  if (stopDistance < MIN_STOP) return { ...empty("Natural stop is inside the spread.", view) };
-  if (stopDistance / entry > MAX_STOP_PCT) return { ...empty("Stop distance is wider than 0.65% of price.", view) };
+  if (!(stop < entry) || stopDistance <= 0) return { ...empty("Stop is not below the entry.", view) };
 
   return {
     ready: true,
@@ -162,16 +160,16 @@ export function evaluateVwapPullback(context: PullbackContext): PullbackSnapshot
     vwap,
     vwapSlope,
     standDown: null,
-    note: "VWAP pullback. Buyers reclaimed the dip.",
+    note: "Trend pullback. Target is twice the stop distance.",
     proposal: {
       symbol: "SPY",
       side: "LONG",
       entryPrice: entry,
       stopPrice: stop,
       targetPrice: roundPrice(entry + stopDistance * TARGET_R),
-      setup: "VWAP_PULLBACK",
+      setup: "TREND_PULLBACK",
       strategy: STRATEGY_ID,
-      reason: "5-minute pullback to a rising VWAP, then a close back above it.",
+      reason: "5-minute dip while price holds a rising VWAP. Stop is at least 1% under the entry and the target is twice that risk.",
       signalBarTs: latest.ts,
     },
   };

@@ -148,6 +148,7 @@ export async function getDesk() {
       status: order.status,
       createdAt: order.createdAt.toISOString(),
       filledAt: order.filledAt?.toISOString() ?? null,
+      sample: order.brokerOrderId == null,
     })),
     events: account.events.map((event) => ({
       id: event.id,
